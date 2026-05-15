@@ -1,6 +1,6 @@
 const prisma = require("../config/prisma");
-const { RequestStatus,PaymentStatus,AssetStatus } = require("@prisma/client");
-
+const {AssetType, RequestStatus,PaymentStatus,AssetStatus } = require("@prisma/client");
+const { uploadToAzure } = require("../utils/azureUpload"); // adjust path
 exports.createAsset = async (req, res) => {
   try {
     const { assetType, assetName, price, freeLimit, imageUrl } = req.body;
@@ -34,17 +34,26 @@ exports.createAsset = async (req, res) => {
 exports.viewAssets = async (req, res) => {
   try {
     const riderId = req.rider?.id;
+    console.log("Logged in riderId:", riderId);
+
     if (!riderId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized"
+      });
     }
 
-    // 1️⃣ Fetch rider_assets for this rider
     const riderAssets = await prisma.rider_assets.findMany({
       where: { riderId },
-      include: { 
-        rider_asset_items: true 
+      include: {
+        rider_asset_items: true
       }
     });
+
+    console.log("riderAssets:", JSON.stringify(riderAssets, null, 2));
+
+    const allRiderAssets = await prisma.rider_assets.findMany();
+    console.log("All rider_assets rows:", JSON.stringify(allRiderAssets, null, 2));
 
     if (!riderAssets || riderAssets.length === 0) {
       return res.status(404).json({
@@ -55,11 +64,13 @@ exports.viewAssets = async (req, res) => {
       });
     }
 
-    // 2️⃣ Transform the response
     let response = [];
-    riderAssets.forEach(rAssets => {
-      rAssets.rider_asset_items.forEach(item => {
-        const isFree = item.status === "ISSUED" && item.condition === "GOOD"; // logic to mark free or paid can be adjusted
+
+    riderAssets.forEach((rAssets) => {
+      rAssets.rider_asset_items.forEach((item) => {
+        const isFree =
+          item.status === "ISSUED" && item.condition === "GOOD";
+
         response.push({
           id: item.id,
           riderAssetsId: rAssets.id,
@@ -75,19 +86,14 @@ exports.viewAssets = async (req, res) => {
       });
     });
 
-    const totalAssets = response.length;
-    const freeAssetsCount = response.filter(a => a.isFree).length;
-    const paidAssetsCount = totalAssets - freeAssetsCount;
-
     return res.status(200).json({
       success: true,
       message: "Rider assets fetched successfully",
-      totalAssets,
-      freeAssetsCount,
-      paidAssetsCount,
+      totalAssets: response.length,
+      freeAssetsCount: response.filter((a) => a.isFree).length,
+      paidAssetsCount: response.filter((a) => !a.isFree).length,
       data: response
     });
-
   } catch (error) {
     console.error("View Rider Assets Error:", error);
     return res.status(500).json({
@@ -160,244 +166,235 @@ exports.requestAsset = async (req, res) => {
   }
 };
 
-exports.approveRequest = async (req, res) => {
-  try {
-    const { riderId } = req.body;
-    if (!riderId) {
-      return res.status(400).json({ success: false, message: "riderId is required" });
-    }
-     console.log("Admin approving riderId:", riderId);
-
-// List all requests for this rider
-const allRequests = await prisma.assetRequest.findMany({
-  where: { riderId },
-  orderBy: { createdAt: "desc" }
-});
-console.log("All requests for this rider:", allRequests);
-
-    // Find latest request ready for dispatch
-    const request = await prisma.assetRequest.findFirst({
-      where: { riderId, status: RequestStatus.READY_FOR_DISPATCH },
-      orderBy: { createdAt: "desc" }
-    });
-
-    if (!request) {
-      return res.status(404).json({ success: false, message: "No request ready for dispatch found" });
-    }
-
-    // Get asset info
-    const asset = await prisma.assetMaster.findFirst({
-      where: { assetType: request.assetType }
-    });
-    if (!asset) {
-      return res.status(404).json({ success: false, message: "Asset not found in master" });
-    }
-
-    // Transaction: update request + add assets to rider_assets
-    const updatedRequest = await prisma.$transaction(async (tx) => {
-      // Create rider_assets if not exists
-      let riderAssets = await tx.rider_assets.findFirst({ where: { riderId } });
-      if (!riderAssets) {
-        riderAssets = await tx.rider_assets.create({
-          data: { riderId, createdAt: new Date(), updatedAt: new Date() }
-        });
-      }
-
-      // Add rider_asset_items
-      const itemsData = Array.from({ length: request.quantity }, () => ({
-        riderAssetsId: riderAssets.id,
-        assetType: asset.assetType,
-        assetName: asset.assetName,
-        issuedDate: new Date(),
-        status: "ISSUED",
-        condition: "GOOD"
-      }));
-
-      await tx.rider_asset_items.createMany({ data: itemsData });
-
-      // Update request status to dispatched
-      return tx.assetRequest.update({
-        where: { id: request.id },
-        data: { status: RequestStatus.DISPATCHED }
-      });
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Request approved and assets dispatched",
-      data: updatedRequest
-    });
-
-  } catch (error) {
-    console.error("Approve Error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Approval failed" });
-  }
-};
 
 exports.makePayment = async (req, res) => {
   try {
     const riderId = req.rider?.id;
-    console.log("Rider ID from token:", riderId);
+
+    const { requestIds } = req.params;
+    const { paymentMode, paymentType, emiMonths } = req.body;
 
     if (!riderId) {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized"
+      });
     }
 
-    const { paymentMode, paymentType, months } = req.body;
-    if (!paymentMode || !paymentType) {
+    if (!requestIds) {
       return res.status(400).json({
         success: false,
-        message: "paymentMode and paymentType are required"
+        message: "requestIds are required"
       });
     }
 
-    // Find latest request pending payment
-    const request = await prisma.assetRequest.findFirst({
-      where: { riderId, 
-    status: { in: [RequestStatus.PENDING, RequestStatus.PAYMENT_PENDING] }
-      },
-      orderBy: { createdAt: "desc" }
-    });
-    console.log("Payment pending request found:", request);
-    if (!request) {
-      return res.status(404).json({ success: false, message: "No payment pending request found" });
-    }
+    const ids = requestIds.split(",");
 
-    // Prevent duplicate payment
-    const existingPayment = await prisma.payment.findUnique({
-      where: { assetRequestId: request.id }
+    const requests = await prisma.assetRequest.findMany({
+      where: {
+        id: { in: ids },
+        riderId
+      }
     });
 
-    if (existingPayment) {
-      return res.status(400).json({ success: false, message: "Payment already completed" });
-    }
-
-    const asset = await prisma.assetMaster.findFirst({
-      where: { assetType: request.assetType }
-    });
-
-    if (!asset) {
-      return res.status(404).json({ success: false, message: "Asset not found in master" });
-    }
-
-    const totalAmount = asset.price * request.quantity;
-
-    // Transaction to create payment and update request status
-    const payment = await prisma.$transaction(async (tx) => {
-      const pay = await tx.payment.create({
-        data: {
-          assetRequestId: request.id,
-          amount: totalAmount,
-          paymentMode,
-          paymentType,
-          status: PaymentStatus.SUCCESS
-        }
+    if (requests.length !== ids.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Some requests not found"
       });
+    }
 
-      if (paymentType === "EMI") {
-        if (!months || months <= 0) throw new Error("Valid months required for EMI");
-        const monthly = totalAmount / months;
-        await tx.emiPlan.create({
+    let totalAmount = 0;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const payments = [];
+
+      for (const item of requests) {
+        const asset = await tx.assetMaster.findUnique({
+          where: { assetType: item.assetType }
+        });
+
+        const amount = asset.price * item.quantity;
+        totalAmount += amount;
+
+        await tx.assetRequest.update({
+          where: { id: item.id },
           data: {
-            paymentId: pay.id,
-            totalAmount,
-            interestRate: 10,
-            months,
-            monthlyAmount: monthly,
-            remainingAmount: totalAmount,
-            nextDueDate: new Date()
+            status: "PAYMENT_PENDING"
           }
         });
+
+        const payment = await tx.payment.upsert({
+          where: {
+            assetRequestId: item.id
+          },
+          update: {
+            amount,
+            paymentMode,
+            paymentType,
+            status: "PENDING"
+          },
+          create: {
+            assetRequestId: item.id,
+            amount,
+            paymentMode,
+            paymentType,
+            status: "PENDING"
+          }
+        });
+
+        if (paymentType === "EMI") {
+          await tx.eMIPlan.upsert({
+            where: {
+              paymentId: payment.id
+            },
+            update: {
+              totalAmount: amount,
+              months: emiMonths,
+              monthlyAmount: amount / emiMonths,
+              remainingAmount: amount,
+              interestRate: 0,
+              nextDueDate: new Date()
+            },
+            create: {
+              paymentId: payment.id,
+              totalAmount: amount,
+              months: emiMonths,
+              monthlyAmount: amount / emiMonths,
+              remainingAmount: amount,
+              interestRate: 0,
+              nextDueDate: new Date()
+            }
+          });
+        }
+
+        payments.push(payment);
       }
 
-      // Update request status to indicate payment completed
-      await tx.assetRequest.update({
-        where: { id: request.id },
-        data: { status: RequestStatus.READY_FOR_DISPATCH }
-      });
-
-      return pay;
+      return payments;
     });
 
     return res.status(200).json({
       success: true,
-      message: "Payment successful. Waiting for admin dispatch",
-      data: payment
+      message: "Payment selected successfully",
+      totalAmount,
+      totalRequests: ids.length,
+      data: result
     });
 
   } catch (error) {
-    console.error("Payment Error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Payment failed" });
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message
+    });
   }
 };
 exports.dispatchAsset = async (req, res) => {
   try {
-    const { requestId, courierName, trackingId } = req.body;
+    const { assetRequestIds } = req.params;
+    const { courierName, trackingId } = req.body;
 
-    // Validate input
-    if (!requestId || !courierName || !trackingId) {
+    if (!assetRequestIds || !courierName || !trackingId) {
       return res.status(400).json({
         success: false,
-        message: "requestId, courierName and trackingId are required"
+        message: "assetRequestIds param, courierName and trackingId are required"
       });
     }
 
-    // Check if asset request exists
-    const request = await prisma.assetRequest.findUnique({
-      where: { id: requestId }
+    const requestIds = assetRequestIds
+      .split(",")
+      .map(id => id.trim())
+      .filter(Boolean);
+
+    if (!requestIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid assetRequestIds found in params"
+      });
+    }
+
+    const requests = await prisma.assetRequest.findMany({
+      where: {
+        id: { in: requestIds }
+      }
     });
 
-    if (!request) {
+    if (!requests.length) {
       return res.status(404).json({
         success: false,
-        message: "Asset request not found"
+        message: "No asset requests found"
       });
     }
 
-    // Ensure payment completed before dispatch
-    if (![RequestStatus.READY_FOR_DISPATCH, RequestStatus.DISPATCHED].includes(request.status)) {
-  return res.status(400).json({
-    success: false,
-    message: "Asset is not ready for dispatch"
-  });
-}
+    if (requests.length !== requestIds.length) {
+      const foundIds = requests.map(r => r.id);
+      const notFoundIds = requestIds.filter(id => !foundIds.includes(id));
 
-    // Prevent duplicate shipment
-    const existingShipment = await prisma.shipment.findUnique({
-      where: { assetRequestId: requestId }
-    });
+      return res.status(404).json({
+        success: false,
+        message: "Some asset requests were not found",
+        notFoundIds
+      });
+    }
 
-    if (existingShipment) {
+    const invalidRequests = requests.filter(
+      r => r.status !== "READY_FOR_DISPATCH"
+    );
+
+    if (invalidRequests.length > 0) {
       return res.status(400).json({
         success: false,
-        message: "Shipment already created for this request"
+        message: "Some assets are not ready for dispatch",
+        invalidRequestIds: invalidRequests.map(r => r.id),
+        statuses: invalidRequests.map(r => ({
+          id: r.id,
+          status: r.status
+        }))
       });
     }
 
-    //  Use transaction for consistency
     const result = await prisma.$transaction(async (tx) => {
+      const shipments = [];
 
-      const shipment = await tx.shipment.create({
-        data: {
-          assetRequestId: requestId,
-          courierName,
-          trackingId,
-          dispatchDate: new Date(),
-          deliveryStatus: "SHIPPED"
-        }
-      });
+      for (const request of requests) {
+        const shipment = await tx.shipment.upsert({
+          where: {
+            assetRequestId: request.id
+          },
+          update: {
+            courierName,
+            trackingId,
+            dispatchDate: new Date(),
+            deliveryStatus: "SHIPPED"
+          },
+          create: {
+            assetRequestId: request.id,
+            courierName,
+            trackingId,
+            dispatchDate: new Date(),
+            deliveryStatus: "SHIPPED"
+          }
+        });
 
-      await tx.assetRequest.update({
-        where: { id: requestId },
-        data: { status: "COMPLETED" }
-      });
+        await tx.assetRequest.update({
+          where: { id: request.id },
+          data: {
+            status: "DISPATCHED"
+          }
+        });
 
-      return shipment;
+        shipments.push(shipment);
+      }
+
+      return shipments;
     });
 
     return res.status(200).json({
       success: true,
-      message: "Asset dispatched successfully",
+      message: "Assets dispatched successfully",
+      totalDispatched: result.length,
+      assetRequestIds: requestIds,
       data: result
     });
 
@@ -406,59 +403,92 @@ exports.dispatchAsset = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Something went wrong while dispatching asset"
+      message: "Something went wrong while dispatching asset",
+      error: error.message
     });
   }
 };
 exports.raiseIssue = async (req, res) => {
   try {
-    //  Get rider from token
     const riderId = req.rider?.id;
+    const { requestId } = req.params;
+    const { assetType, description, issueType, imageUrl } = req.body;
 
     if (!riderId) {
       return res.status(401).json({
         success: false,
-        message: "Unauthorized - Invalid token"
+        message: "Unauthorized"
       });
     }
 
-    const { riderAssetsId, assetType, description, issueType } = req.body;
-    const imageUrl = req.file?.path || null;
-
-    // Validate required fields
-    if (!riderAssetsId || !assetType || !description) {
+    if (!assetType || !description) {
       return res.status(400).json({
         success: false,
-        message: "riderAssetsId, assetType and description are required"
+        message: "assetType and description are required"
       });
     }
-    console.log("Token Rider ID:", riderId);
-console.log("Request riderAssetsId:", riderAssetsId);
 
-    // Check asset belongs to rider
-    const riderAsset = await prisma.rider_assets.findFirst({
-      where: {
-        id: riderAssetsId,
-        riderId: riderId   //  token validation here
-      }
-      
+    const assetRequest = await prisma.assetRequest.findUnique({
+      where: { id: requestId }
     });
-    console.log("DB Asset Record:", riderAsset);
-    if (!riderAsset) {
+
+    if (!assetRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Asset request not found"
+      });
+    }
+
+    if (assetRequest.riderId !== riderId) {
       return res.status(403).json({
         success: false,
-        message: "You are not allowed to raise issue for this asset"
+        message: "You are not allowed to raise issue for this request"
       });
     }
 
-    // Create issue
+    if (assetRequest.status !== "COMPLETED") {
+      return res.status(400).json({
+        success: false,
+        message: "You can raise issue only after asset is delivered"
+      });
+    }
+
+    const riderAsset = await prisma.rider_assets.findFirst({
+      where: {
+        riderId
+      },
+      include: {
+        rider_asset_items: {
+          where: {
+            assetType: assetType
+          }
+        }
+      }
+    });
+
+    if (!riderAsset || riderAsset.rider_asset_items.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "This asset type is not assigned to the rider",
+        debug: {
+          riderId,
+          assetType,
+          requestId
+        }
+      });
+    }
+
+    const riderAssetItem = riderAsset.rider_asset_items[0];
+
     const issue = await prisma.rider_asset_issues.create({
       data: {
-        riderAssetsId,
+        requestId,
+        riderAssetsId: riderAsset.id,
         assetType,
-        description,
-        imageUrl,
+        assetName: riderAssetItem.assetName || assetType,
         issueType: issueType || "OTHER",
+        description,
+        imageUrl: imageUrl || null,
         status: "OPEN"
       }
     });
@@ -474,70 +504,684 @@ console.log("Request riderAssetsId:", riderAssetsId);
 
     return res.status(500).json({
       success: false,
-      message: error.message || "Something went wrong while raising issue"
+      message: "Something went wrong",
+      error: error.message
+    });
+  }
+};
+exports.uploadIssueImage = async (req, res) => {
+  try {
+    const riderId = req.rider?.id;
+    const { issueId } = req.params;
+
+    if (!riderId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Issue image is required"
+      });
+    }
+
+    const issue = await prisma.rider_asset_issues.findUnique({
+      where: { id: issueId },
+      include: {
+        rider_assets: true
+      }
+    });
+
+    if (!issue) {
+      return res.status(404).json({
+        success: false,
+        message: "Issue not found"
+      });
+    }
+
+    if (issue.rider_assets.riderId !== riderId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to upload image for this issue"
+      });
+    }
+
+    const imageUrl = await uploadToAzure(req.file, "asset-issues");
+
+    const updatedIssue = await prisma.rider_asset_issues.update({
+      where: { id: issueId },
+      data: {
+        imageUrl
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Issue image uploaded successfully",
+      data: updatedIssue
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
 };
 
 exports.markAsDelivered = async (req, res) => {
   try {
-    const { shipmentId } = req.body;
+    const { requestIds } = req.params;
 
-    if (!shipmentId) {
-      return res.status(400).json({ success: false, message: "shipmentId is required" });
+    if (!requestIds) {
+      return res.status(400).json({
+        success: false,
+        message: "requestIds are required",
+      });
     }
 
-    const shipment = await prisma.shipment.findUnique({
-      where: { id: shipmentId },
-      include: { AssetRequest: true } // include request to update it
+    const ids = requestIds
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    if (ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid requestIds are required",
+      });
+    }
+
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const shipments = await tx.shipment.findMany({
+          where: {
+            assetRequestId: {
+              in: ids,
+            },
+          },
+          include: {
+            AssetRequest: true,
+          },
+        });
+
+        if (shipments.length !== ids.length) {
+          return {
+            success: false,
+            statusCode: 404,
+            message: "Some shipments not found",
+            foundShipmentRequestIds: shipments.map((s) => s.assetRequestId),
+            missingRequestIds: ids.filter(
+              (id) => !shipments.some((s) => s.assetRequestId === id)
+            ),
+          };
+        }
+
+        const delivered = [];
+        const alreadyDelivered = [];
+
+        for (const shipment of shipments) {
+          const assetRequest = shipment.AssetRequest;
+
+          if (!assetRequest) {
+            throw new Error(
+              `AssetRequest not found for shipment ${shipment.id}`
+            );
+          }
+
+          if (shipment.deliveryStatus === "DELIVERED") {
+            alreadyDelivered.push({
+              shipmentId: shipment.id,
+              assetRequestId: shipment.assetRequestId,
+              deliveryStatus: shipment.deliveryStatus,
+            });
+            continue;
+          }
+
+          const updatedShipment = await tx.shipment.update({
+            where: {
+              id: shipment.id,
+            },
+            data: {
+              deliveryStatus: "DELIVERED",
+              deliveredDate: new Date(),
+            },
+          });
+
+          const updatedAssetRequest = await tx.assetRequest.update({
+            where: {
+              id: assetRequest.id,
+            },
+            data: {
+              status: "COMPLETED",
+            },
+          });
+
+          let riderAsset = await tx.rider_assets.findFirst({
+            where: {
+              riderId: assetRequest.riderId,
+            },
+          });
+
+          if (!riderAsset) {
+            riderAsset = await tx.rider_assets.create({
+              data: {
+                riderId: assetRequest.riderId,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            });
+          } else {
+            riderAsset = await tx.rider_assets.update({
+              where: {
+                id: riderAsset.id,
+              },
+              data: {
+                updatedAt: new Date(),
+              },
+            });
+          }
+
+          const riderAssetItem = await tx.rider_asset_items.create({
+            data: {
+              riderAssetsId: riderAsset.id,
+              assetType: assetRequest.assetType,
+              assetName: assetRequest.assetType,
+              quantity: assetRequest.quantity,
+              status: "ISSUED",
+              condition: "GOOD",
+              issuedDate: new Date(),
+            },
+          });
+
+          delivered.push({
+            shipmentId: updatedShipment.id,
+            assetRequestId: updatedShipment.assetRequestId,
+            riderId: assetRequest.riderId,
+            assetType: assetRequest.assetType,
+            quantity: assetRequest.quantity,
+            deliveryStatus: updatedShipment.deliveryStatus,
+            requestStatus: updatedAssetRequest.status,
+            riderAssetId: riderAsset.id,
+            riderAssetItemId: riderAssetItem.id,
+            completedStatus: "COMPLETED",
+            isCompleted: true,
+          });
+        }
+
+        return {
+          success: true,
+          statusCode: 200,
+          delivered,
+          alreadyDelivered,
+        };
+      },
+      {
+        maxWait: 10000,
+        timeout: 30000,
+      }
+    );
+
+    if (!result.success) {
+      return res.status(result.statusCode).json({
+        success: false,
+        message: result.message,
+        foundShipmentRequestIds: result.foundShipmentRequestIds,
+        missingRequestIds: result.missingRequestIds,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Assets delivered and rider assets created successfully",
+      totalDelivered: result.delivered.length,
+      totalAlreadyDelivered: result.alreadyDelivered.length,
+      completedStatus:
+        result.delivered.length > 0 || result.alreadyDelivered.length > 0
+          ? "COMPLETED"
+          : "PENDING",
+      isCompleted:
+        result.delivered.length > 0 || result.alreadyDelivered.length > 0,
+      data: {
+        delivered: result.delivered,
+        alreadyDelivered: result.alreadyDelivered,
+      },
+    });
+  } catch (error) {
+    console.error("Mark Delivered Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message,
+    });
+  }
+};
+exports.requestJoiningKit = async (req, res) => {
+  try {
+    if (!req.rider?.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    const riderId = req.rider.id;
+
+    const {
+      deliveryMode,
+      name,
+      completeAddress,
+      pincode,
+      pickupLocationId
+    } = req.body;
+
+    if (!deliveryMode) {
+      return res.status(400).json({
+        success: false,
+        message: "deliveryMode is required"
+      });
+    }
+
+    if (!["HOME_DELIVERY", "PICKUP"].includes(deliveryMode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid deliveryMode"
+      });
+    }
+
+    if (deliveryMode === "HOME_DELIVERY") {
+      if (!name || !completeAddress || !pincode) {
+        return res.status(400).json({
+          success: false,
+          message: "name, completeAddress and pincode required for HOME_DELIVERY"
+        });
+      }
+    }
+
+    if (deliveryMode === "PICKUP" && !pickupLocationId) {
+      return res.status(400).json({
+        success: false,
+        message: "pickupLocationId required for PICKUP"
+      });
+    }
+
+    const joiningKitAssets = [
+      "T_SHIRT",
+      "BAG",
+      "HELMET",
+      "JACKET",
+      "ID_CARD"
+    ];
+
+    // Block only if kit request is still pending/in progress
+    const pendingStatuses = [
+      "PENDING",
+      "APPROVED",
+      "PAYMENT_PENDING",
+      "READY_FOR_DISPATCH",
+      "DISPATCHED"
+    ];
+
+    const existingPendingRequests = await prisma.assetRequest.findMany({
+      where: {
+        riderId,
+        assetType: {
+          in: joiningKitAssets
+        },
+        status: {
+          in: pendingStatuses
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
     });
 
-    if (!shipment) {
-      return res.status(404).json({ success: false, message: "Shipment not found" });
+    if (existingPendingRequests.length > 0) {
+      const statusSummary = existingPendingRequests.reduce((acc, item) => {
+        acc[item.status] = (acc[item.status] || 0) + 1;
+        return acc;
+      }, {});
+
+      return res.status(400).json({
+        success: false,
+        message: "Joining kit already in progress",
+        statusSummary,
+        totalPendingItems: existingPendingRequests.length,
+        data: existingPendingRequests
+      });
     }
 
-    if (shipment.deliveryStatus === "DELIVERED") {
-      return res.status(400).json({ success: false, message: "Shipment already marked as delivered" });
-    }
-
-    // Transaction to update shipment + assetRequest + rider_asset_items
     const result = await prisma.$transaction(async (tx) => {
-      // 1️⃣ Update shipment
-      const updatedShipment = await tx.shipment.update({
-        where: { id: shipmentId },
+      const createdRequests = [];
+      let totalPrice = 0;
+      let freeItemCount = 0;
+
+      if (deliveryMode === "HOME_DELIVERY") {
+        await tx.riderKitAddress.upsert({
+          where: { riderId },
+          update: {
+            name,
+            completeAddress,
+            pincode,
+            onboardingKitStatus: false
+          },
+          create: {
+            riderId,
+            name,
+            completeAddress,
+            pincode,
+            onboardingKitStatus: false
+          }
+        });
+      }
+
+      for (const assetType of joiningKitAssets) {
+        const asset = await tx.assetMaster.findUnique({
+          where: { assetType }
+        });
+
+        if (!asset) continue;
+
+        const isFree = asset.issuedCount < asset.freeLimit;
+        const price = isFree ? 0 : Number(asset.price);
+
+        if (isFree) freeItemCount++;
+
+        const request = await tx.assetRequest.create({
+          data: {
+            riderId,
+            assetType,
+            quantity: 1,
+            deliveryMode,
+            pickupLocationId:
+              deliveryMode === "PICKUP" ? pickupLocationId : null,
+            status: isFree ? "READY_FOR_DISPATCH" : "PAYMENT_PENDING"
+          }
+        });
+
+        await tx.assetMaster.update({
+          where: { id: asset.id },
+          data: {
+            issuedCount: {
+              increment: 1
+            }
+          }
+        });
+
+        totalPrice += price;
+
+        createdRequests.push({
+          ...request,
+          deliveryDetails:
+            deliveryMode === "HOME_DELIVERY"
+              ? {
+                  deliveryMode,
+                  name,
+                  completeAddress,
+                  pincode
+                }
+              : {
+                  deliveryMode,
+                  pickupLocationId
+                },
+          price,
+          isFree
+        });
+      }
+
+      return {
+        createdRequests,
+        totalPrice,
+        freeItemCount
+      };
+    });
+
+    const isEntireKitFree =
+      result.createdRequests.length > 0 &&
+      result.freeItemCount === result.createdRequests.length;
+
+    return res.status(201).json({
+      success: true,
+      message: isEntireKitFree
+        ? "Congratulations! You got the free joining kit."
+        : "Joining kit requested successfully",
+      totalItems: result.createdRequests.length,
+      totalPrice: result.totalPrice,
+      isEntireKitFree,
+      freeItemCount: result.freeItemCount,
+      data: result.createdRequests
+    });
+  } catch (error) {
+    console.error("Request Joining Kit Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message
+    });
+  }
+};
+exports.verifyIssue = async (req, res) => {
+  try {
+    const { issueId } = req.params;
+    const { action, adminRemark } = req.body;
+
+    if (!issueId) {
+      return res.status(400).json({
+        success: false,
+        message: "issueId is required in params"
+      });
+    }
+
+    if (!action || !["APPROVE", "REJECT"].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid action. Allowed: APPROVE, REJECT"
+      });
+    }
+
+    const issue = await prisma.rider_asset_issues.findUnique({
+      where: { id: issueId }
+    });
+
+    if (!issue) {
+      return res.status(404).json({
+        success: false,
+        message: "Issue not found"
+      });
+    }
+
+    if (issue.status !== "OPEN") {
+      return res.status(400).json({
+        success: false,
+        message: `Issue already processed with status ${issue.status}`
+      });
+    }
+
+    if (!issue.requestId) {
+      return res.status(400).json({
+        success: false,
+        message: "requestId not found in issue"
+      });
+    }
+
+    const assetRequest = await prisma.assetRequest.findUnique({
+      where: { id: issue.requestId }
+    });
+
+    if (!assetRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Asset request not found"
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      if (action === "REJECT") {
+        return await tx.rider_asset_issues.update({
+          where: { id: issueId },
+          data: {
+            status: "REJECTED",
+            resolvedAt: new Date()
+          }
+        });
+      }
+
+      await tx.assetRequest.update({
+        where: { id: issue.requestId },
         data: {
-          deliveryStatus: "DELIVERED",
-          deliveredDate: new Date()
+          status: "READY_FOR_DISPATCH"
         }
       });
 
-      // 2️⃣ Update assetRequest status
-      await tx.assetRequest.update({
-        where: { id: shipment.assetRequestId },
-        data: { status: RequestStatus.COMPLETED }
-      });
-
-      // 3️⃣ Update rider_asset_items (optional: mark delivered)
-      const riderAssets = await tx.rider_asset_items.updateMany({
+      await tx.shipment.upsert({
         where: {
-          riderAssetsId: shipment.AssetRequest.riderId,
-          assetType: shipment.AssetRequest.assetType,
-          status: AssetStatus.ISSUED
+          assetRequestId: issue.requestId
         },
-        data: { status: AssetStatus.ISSUED } // You can create new status DELIVERED if needed
+        update: {
+          deliveryStatus: "NOT_DISPATCHED",
+          courierName: null,
+          trackingId: null,
+          dispatchDate: null,
+          deliveredDate: null
+        },
+        create: {
+          assetRequestId: issue.requestId,
+          deliveryStatus: "NOT_DISPATCHED"
+        }
       });
 
-      return updatedShipment;
+      const updatedIssue = await tx.rider_asset_issues.update({
+  where: { id: issueId },
+  data: {
+    status: "RESOLVED",
+    resolvedAt: new Date()
+  }
+});
+
+      return updatedIssue;
     });
 
     return res.status(200).json({
       success: true,
-      message: "Shipment marked as delivered and rider assets updated",
+      message:
+        action === "APPROVE"
+          ? "Issue approved and asset moved to READY_FOR_DISPATCH"
+          : "Issue rejected successfully",
       data: result
     });
 
   } catch (error) {
-    console.error("Mark Delivered Error:", error);
-    return res.status(500).json({ success: false, message: error.message || "Failed to update delivery" });
+    console.error("Verify Issue Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      error: error.message
+    });
+  }
+};
+
+exports.completePaymentAndReadyForDispatch = async (req, res) => {
+  try {
+    const riderId = req.rider?.id;
+    const { requestIds } = req.params;
+
+    if (!riderId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized rider"
+      });
+    }
+
+    const requestIdArray = requestIds
+      ? requestIds.split(",").map(id => id.trim()).filter(Boolean)
+      : [];
+
+    if (requestIdArray.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "requestIds are required"
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const requests = await tx.assetRequest.findMany({
+        where: {
+          id: { in: requestIdArray },
+          riderId
+        },
+        include: {
+          Payment: true
+        }
+      });
+
+      if (requests.length !== requestIdArray.length) {
+        throw new Error("Some asset requests are invalid or do not belong to this rider");
+      }
+
+      const noPaymentRequest = requests.find((request) => {
+        if (Array.isArray(request.Payment)) {
+          return request.Payment.length === 0;
+        }
+
+        return !request.Payment;
+      });
+
+      if (noPaymentRequest) {
+        throw new Error("Payment record not found for some requests");
+      }
+
+      await tx.payment.updateMany({
+        where: {
+          assetRequestId: { in: requestIdArray },
+          status: "PENDING"
+        },
+        data: {
+          status: "SUCCESS",
+          paidAt: new Date()
+        }
+      });
+
+      await tx.assetRequest.updateMany({
+        where: {
+          id: { in: requestIdArray },
+          riderId
+        },
+        data: {
+          status: "READY_FOR_DISPATCH"
+        }
+      });
+
+      const updatedRequests = await tx.assetRequest.findMany({
+        where: {
+          id: { in: requestIdArray },
+          riderId
+        },
+        include: {
+          Payment: true
+        }
+      });
+
+      return updatedRequests;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment completed successfully. Requests moved to ready for dispatch",
+      totalRequests: result.length,
+      data: result
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Something went wrong"
+    });
   }
 };

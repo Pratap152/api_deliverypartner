@@ -1,5 +1,4 @@
 
-const { emitRiderDashboard } = require("../sockets/socket");
 const { getCurrentSlot } = require("../utils/slot.helper");
 
 exports.markOrderDelivered = async (req, res) => {
@@ -98,7 +97,7 @@ exports.markOrderDelivered = async (req, res) => {
       slotMessage = "🎉 Slot target achieved!";
     }
     else if (remaining <= 2) {
-      slotMessage = `🔥 Almost there! Only ${remaining} orders left`;
+      slotMessage = ` Almost there! Only ${remaining} orders left`;
     }
 
     // ---------------- EMIT WS DASHBOARD ----------------

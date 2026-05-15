@@ -13,7 +13,8 @@ const {
     cancelOrder,
     getOrdersByRider,
     getDeliveredOrdersByRider,
-    getCancelledOrdersByRider
+    getCancelledOrdersByRider,
+    getSurgeStatus
 } = require("../controllers/orderController");
 
 const { riderAuthMiddleWare } = require("../middleware/riderAuthMiddleware");
@@ -23,151 +24,411 @@ const { riderAuthMiddleWare } = require("../middleware/riderAuthMiddleware");
 // CREATE ORDER
 // ================================
 /**
- * @swagger
- * /api/orders/orderCreate:
- *   post:
- *     tags:
- *       - Orders
- *     summary: Create a new order
- *     description: >
- *       Creates a new order with item-level pricing calculation.
- *       This API only creates the order and sets initial values.
- *       Rider allocation, distance, ETA, and earnings are handled later.
- *
- *     security:
- *       - bearerAuth: []
- *
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - vendorShopName
- *               - items
- *               - pickupAddress
- *               - deliveryAddress
- *               - payment
- *             properties:
- *               vendorShopName:
- *                 type: string
- *                 example: Fresh Mart Grocery
- *
- *               items:
- *                 type: array
- *                 minItems: 1
- *                 items:
- *                   type: object
- *                   required:
- *                     - itemName
- *                     - quantity
- *                     - price
- *                     - total        # ✅ ADDED AS REQUIRED
- *                   properties:
- *                     itemName:
- *                       type: string
- *                       example: Basmati Rice
- *                     quantity:
- *                       type: number
- *                       example: 2
- *                     price:
- *                       type: number
- *                       example: 60
- *                     total:         # ✅ ADDED FIELD
- *                       type: number
- *                       example: 120
- *
- *               pickupAddress:
- *                 type: object
- *                 required:
- *                   - name
- *                   - addressLine
- *                   - contactNumber
- *                 properties:
- *                   name:
- *                     type: string
- *                     example: Fresh Mart Store
- *                   addressLine:
- *                     type: string
- *                     example: Madhapur, Hyderabad
- *                   contactNumber:
- *                     type: string
- *                     example: 9876543210
- *
- *               deliveryAddress:
- *                 type: object
- *                 required:
- *                   - name
- *                   - addressLine
- *                   - contactNumber
- *                 properties:
- *                   name:
- *                     type: string
- *                     example: Rohit Kumar
- *                   addressLine:
- *                     type: string
- *                     example: Kukatpally, Hyderabad
- *                   contactNumber:
- *                     type: string
- *                     example: 9123456780
- *
- *               payment:
- *                 type: object
- *                 required:
- *                   - mode
- *                 properties:
- *                   mode:
- *                     type: string
- *                     enum: [COD, ONLINE]
- *                     example: COD
- *
- *     responses:
- *       201:
- *         description: Order created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 orderId:
- *                   type: string
- *                   example: ORD-8F3A2C1B
- *                 mongoId:
- *                   type: string
- *                   example: 65a9b2c44e1f2a0012a45678
- *
- *       400:
- *         description: Validation error
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: vendorShopName is required
- *
- *       500:
- *         description: Internal server error while creating order
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Order creation failed
- */
+
+* @swagger
+
+* /api/orders/orderCreate:
+
+*   post:
+
+*     tags:
+
+*       - Orders
+
+*     summary: Create a new order
+
+*     description: >
+
+*       Creates a new order with geolocation, payment handling, and weight-based validation.
+
+*       Converts item weights (g, kg, ml, l) into KG and calculates total order weight.
+
+*       Orders above 20kg are rejected for bike delivery.
+
+*       Also stores pickup location with pincode for rider allocation.
+
+*
+
+*     security:
+
+*       - bearerAuth: []
+
+*
+
+*     requestBody:
+
+*       required: true
+
+*       content:
+
+*         application/json:
+
+*           schema:
+
+*             type: object
+
+*             required:
+
+*               - vendorShopName
+
+*               - items
+
+*               - pickupAddress
+
+*               - deliveryAddress
+
+*               - payment
+
+*             properties:
+
+*
+
+*               vendorShopName:
+
+*                 type: string
+
+*                 example: Fresh Mart Grocery
+
+*
+
+*               items:
+
+*                 type: array
+
+*                 minItems: 1
+
+*                 items:
+
+*                   type: object
+
+*                   required:
+
+*                     - itemName
+
+*                     - quantity
+
+*                     - price
+
+*                     - total
+
+*                     - weightPerUnit
+
+*                     - weightUnit
+
+*                   properties:
+
+*                     itemName:
+
+*                       type: string
+
+*                       example: Basmati Rice
+
+*
+
+*                     quantity:
+
+*                       type: number
+
+*                       example: 2
+
+*
+
+*                     price:
+
+*                       type: number
+
+*                       example: 60
+
+*
+
+*                     total:
+
+*                       type: number
+
+*                       example: 120
+
+*
+
+*                     weightPerUnit:
+
+*                       type: number
+
+*                       example: 500
+
+*
+
+*                     weightUnit:
+
+*                       type: string
+
+*                       enum: [g, kg, ml, l]
+
+*                       example: g
+
+*
+
+*               pickupAddress:
+
+*                 type: object
+
+*                 required:
+
+*                   - name
+
+*                   - addressLine
+
+*                   - contactNumber
+
+*                   - pincode
+
+*                 properties:
+
+*                   name:
+
+*                     type: string
+
+*                     example: Fresh Mart Store
+
+*
+
+*                   addressLine:
+
+*                     type: string
+
+*                     example: Madhapur, Hyderabad
+
+*
+
+*                   contactNumber:
+
+*                     type: string
+
+*                     example: 9876543210
+
+*
+
+*                   pincode:
+
+*                     type: string
+
+*                     example: 500081
+
+*
+
+*               deliveryAddress:
+
+*                 type: object
+
+*                 required:
+
+*                   - name
+
+*                   - addressLine
+
+*                   - contactNumber
+
+*                 properties:
+
+*                   name:
+
+*                     type: string
+
+*                     example: Rohit Kumar
+
+*
+
+*                   addressLine:
+
+*                     type: string
+
+*                     example: Kukatpally, Hyderabad
+
+*
+
+*                   contactNumber:
+
+*                     type: string
+
+*                     example: 9123456780
+
+*
+
+*               payment:
+
+*                 type: object
+
+*                 required:
+
+*                   - mode
+
+*                 properties:
+
+*                   mode:
+
+*                     type: string
+
+*                     enum: [COD, ONLINE]
+
+*                     example: COD
+
+*
+
+*                   codPaymentType:
+
+*                     type: string
+
+*                     enum: [CASH, UPI]
+
+*                     example: CASH
+
+*
+
+*     responses:
+
+*
+
+*       201:
+
+*         description: Order created successfully
+
+*         content:
+
+*           application/json:
+
+*             schema:
+
+*               type: object
+
+*               properties:
+
+*
+
+*                 success:
+
+*                   type: boolean
+
+*                   example: true
+
+*
+
+*                 message:
+
+*                   type: string
+
+*                   example: Order created successfully
+
+*
+
+*                 orderId:
+
+*                   type: string
+
+*                   example: ORD-8F3A2C1B
+
+*
+
+*                 totalWeight:
+
+*                   type: string
+
+*                   example: 4.50 kg
+
+*
+
+*                 payment:
+
+*                   type: object
+
+*                   properties:
+
+*                     mode:
+
+*                       type: string
+
+*                       example: COD
+
+*
+
+*                     status:
+
+*                       type: string
+
+*                       example: PENDING
+
+*
+
+*                     transactionId:
+
+*                       type: string
+
+*                       example: TXN12345
+
+*
+
+*       400:
+
+*         description: Validation error or weight exceeded
+
+*         content:
+
+*           application/json:
+
+*             schema:
+
+*               type: object
+
+*               properties:
+
+*
+
+*                 success:
+
+*                   type: boolean
+
+*                   example: false
+
+*
+
+*                 message:
+
+*                   type: string
+
+*                   example: Order weight 22.5kg exceeds 20kg limit for biker
+
+*
+
+*       500:
+
+*         description: Internal server error
+
+*         content:
+
+*           application/json:
+
+*             schema:
+
+*               type: object
+
+*               properties:
+
+*
+
+*                 success:
+
+*                   type: boolean
+
+*                   example: false
+
+*
+
+*                 message:
+
+*                   type: string
+
+*                   example: Order creation failed
+
+*/
+ 
 
 router.post("/orderCreate", createOrder);
 
@@ -178,6 +439,7 @@ router.post("/orderCreate", createOrder);
 
 
 /**
+ *
  * @swagger
  * /api/orders/{orderId}/confirm:
  *   patch:
@@ -259,7 +521,9 @@ router.post("/orderCreate", createOrder);
  *                   type: string
  *                   example: Failed to confirm order
  */
-
+ 
+ 
+ 
 
 router.patch("/:orderId/confirm", confirmOrder);
 
@@ -980,6 +1244,77 @@ router.get("/cancelled",riderAuthMiddleWare,getCancelledOrdersByRider);
 
 
 
+/**
+ * @swagger
+ * /api/orders/rider/surge-status:
+ *   get:
+ *     summary: Get rider surge eligibility status
+ *     description: Checks whether the logged-in rider is eligible for surge pricing based on rider pincode and payout configuration.
+ *     tags:
+ *       - Orders
+ * 
+ *     security:
+ *       - bearerAuth: []
+ * 
+ *     responses:
+ *       200:
+ *         description: Surge status fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ * 
+ *                 data:
+ *                   type: object
+ *                   properties:
+ * 
+ *                     surgeActive:
+ *                       type: boolean
+ *                       example: true
+ * 
+ *                     multiplier:
+ *                       type: number
+ *                       example: 1.5
+ * 
+ *                     surgeAmount:
+ *                       type: number
+ *                       example: 50
+ * 
+ *       400:
+ *         description: Rider pincode not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ * 
+ *                 message:
+ *                   type: string
+ *                   example: Rider pincode not found
+ * 
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ * 
+ *                 message:
+ *                   type: string
+ *                   example: Failed to fetch surge status
+ */
+router.get("/rider/surge-status", riderAuthMiddleWare, getSurgeStatus);
 
 
 module.exports = router;

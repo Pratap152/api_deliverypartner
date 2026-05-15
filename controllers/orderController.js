@@ -1,16 +1,15 @@
-const Order = require("../models/OrderSchema");
 const crypto = require("crypto");
 const {notifyRider} = require("../webSocket");
-const Rider=require('../models/RiderModel')
 const axios = require("axios");
-const PricingConfig=require("../models/pricingConfigSchema")
-const mongoose=require('mongoose')
 const { getLatLng } = require("../services/geocodeService");
-const Incentive = require("../models/IncentiveSchema");
-const RiderIncentiveProgress = require("../models/RiderIncentiveProgressSchema");
 const prisma=require('../config/prisma');
-
-// 👉 Dummy transaction generator
+const getWeather=require('../utils/weather');
+const {
+  processOrderIncentive
+} = require(
+  "../services/incentiveService"
+);
+//  Dummy transaction generator
 function generateTxn() {
   return "TXN_" + crypto.randomBytes(6).toString("hex");
 }
@@ -20,15 +19,29 @@ function generateOrderId(){
 }
 
 
+//  helper function
+function convertToKg(weight, unit) {
+  switch (unit) {
+    case "g":
+      return weight / 1000;
+
+    case "kg":
+      return weight;
+
+    case "ml":
+      return weight / 1000;
+
+    case "l":
+      return weight;
+
+    default:
+      throw new Error("Invalid weight unit");
+  }
+}
+
 async function createOrder(req, res) {
-
   try {
-
     const body = req.body;
-
-    //////////////////////////////////////////////////////
-    // 1️ GET LAT LNG
-    //////////////////////////////////////////////////////
 
     const pickupGeo = await getLatLng(
       body.pickupAddress.addressLine
@@ -38,37 +51,52 @@ async function createOrder(req, res) {
       body.deliveryAddress.addressLine
     );
 
-    //////////////////////////////////////////////////////
-    // 2️ PAYMENT LOGIC
-    //////////////////////////////////////////////////////
-
     let paymentData = {
       mode: body.payment.mode,
       status: "PENDING"
     };
 
     if (body.payment.mode === "ONLINE") {
-
       paymentData.transactionId = generateTxn();
       paymentData.status = "SUCCESS";
-
     }
 
     if (body.payment.mode === "COD") {
-
       paymentData.codPaymentType =
         body.payment.codPaymentType || "CASH";
-
     }
 
-    //////////////////////////////////////////////////////
-    // 3️ CALCULATE ITEM TOTAL
-    //////////////////////////////////////////////////////
+    let itemTotal = 0;
+    let totalWeight = 0;
 
-    let itemTotal = body.items.reduce(
-      (sum, i) => sum + i.total,
-      0
-    );
+    for (const item of body.items) {
+      itemTotal += item.total;
+
+      
+      if (!item.weightPerUnit || !item.weightUnit) {
+        return res.status(400).json({
+          success: false,
+          message: "weightPerUnit and weightUnit are required"
+        });
+      }
+
+      const weightInKg = convertToKg(
+        item.weightPerUnit,
+        item.weightUnit.toLowerCase()
+      );
+
+      totalWeight += weightInKg * item.quantity;
+    }
+
+    
+    if (totalWeight > 20) {
+      return res.status(400).json({
+        success: false,
+        message: `Order weight ${totalWeight.toFixed(
+          2
+        )}kg exceeds 20kg limit for biker`
+      });
+    }
 
     const deliveryFee = 40;
     const tax = 5;
@@ -77,147 +105,99 @@ async function createOrder(req, res) {
     const totalAmount =
       itemTotal + deliveryFee + tax;
 
-    //////////////////////////////////////////////////////
-    // 4️⃣ CREATE ORDER (PRISMA)
-    //////////////////////////////////////////////////////
-
 
     const order = await prisma.order.create({
+      data: {
+        orderId: generateOrderId(),
+        vendorShopName: body.vendorShopName,
 
-  data: {
+        
+        totalWeight: totalWeight,
 
-    orderId: generateOrderId(),
+        OrderItems: {
+          create: body.items.map(item => ({
+            itemName: item.itemName,
+            quantity: item.quantity,
+            price: item.price,
+            total: item.total,
+            weightPerUnit: item.weightPerUnit,
+            weightUnit: item.weightUnit.toLowerCase() 
+          }))
+        },
 
-    vendorShopName: body.vendorShopName,
-
-    //////////////////////////////////////////////////
-    // ITEMS
-    //////////////////////////////////////////////////
-
-    OrderItems: {
-      create: body.items.map(item => ({
-        itemName: item.itemName,
-        quantity: item.quantity,
-        price: item.price,
-        total: item.total
-      }))
-    },
-
-    //////////////////////////////////////////////////
-    // PICKUP ADDRESS
-    //////////////////////////////////////////////////
-
-    OrderPickupAddress: {
-      create: {
-        name: body.pickupAddress.name,
-        addressLine: body.pickupAddress.addressLine,
-        contactNumber: body.pickupAddress.contactNumber,
-        latitude: pickupGeo.lat,
-        longitude: pickupGeo.lng
-      }
-    },
-
-    //////////////////////////////////////////////////
-    // DELIVERY ADDRESS
-    //////////////////////////////////////////////////
-
-    OrderDeliveryAddress: {
-      create: {
-        name: body.deliveryAddress.name,
-        addressLine: body.deliveryAddress.addressLine,
-        contactNumber: body.deliveryAddress.contactNumber,
-        latitude: deliveryGeo.lat,
-        longitude: deliveryGeo.lng
-      }
-    },
-
-    //////////////////////////////////////////////////
-    // PRICING
-    //////////////////////////////////////////////////
-
-    OrderPricing: {
-      create: {
-        itemTotal,
-        deliveryFee,
-        tax,
-        platformCommission,
-        totalAmount
-      }
-    },
-
-    //////////////////////////////////////////////////
-    // PAYMENT
-    //////////////////////////////////////////////////
-
-    OrderPayment: {
-      create: paymentData
-    },
-
-    //////////////////////////////////////////////////
-    // COD (ONLY IF COD)
-    //////////////////////////////////////////////////
-
-    OrderCod:
-      body.payment.mode === "COD"
-        ? {
-            create: {
-              amount: totalAmount,
-              pendingAmount: totalAmount
-            }
+        
+        OrderPickupAddress: {
+          create: {
+            name: body.pickupAddress.name,
+            addressLine: body.pickupAddress.addressLine,
+            contactNumber:
+              body.pickupAddress.contactNumber,
+            latitude: pickupGeo.lat,
+            longitude: pickupGeo.lng,
+            pincode: body.pickupAddress.pincode 
           }
-        : undefined
+        },
 
-  },
+        OrderDeliveryAddress: {
+          create: {
+            name: body.deliveryAddress.name,
+            addressLine:
+              body.deliveryAddress.addressLine,
+            contactNumber:
+              body.deliveryAddress.contactNumber,
+            latitude: deliveryGeo.lat,
+            longitude: deliveryGeo.lng
+          }
+        },
 
-  include: {
-    OrderPayment: true
-  }
+        OrderPricing: {
+          create: {
+            itemTotal,
+            deliveryFee,
+            tax,
+            platformCommission,
+            totalAmount
+          }
+        },
 
-});
+        OrderPayment: {
+          create: paymentData
+        },
+        OrderCod:
+          body.payment.mode === "COD"
+            ? {
+                create: {
+                  amount: totalAmount,
+                  pendingAmount: totalAmount
+                }
+              }
+            : undefined
+      },
 
-    //////////////////////////////////////////////////////
-    // 5️ RESPONSE (same Swagger)
-    //////////////////////////////////////////////////////
-
-    return res.status(201).json({
-
-      success: true,
-
-      message: "Order created successfully",
-
-      orderId: order.orderId,
-
-      payment: order.payment
-
+      include: {
+        OrderPayment: true
+      }
     });
 
-  }
-  catch (err) {
+  
+    return res.status(201).json({
+      success: true,
+      message: "Order created successfully",
+      orderId: order.orderId,
+      totalWeight: totalWeight.toFixed(2) + " kg",
+      payment: order.OrderPayment
+    });
 
+  } catch (err) {
     console.error(err);
 
     return res.status(500).json({
-
       success: false,
-
       message: err.message
-
     });
-
   }
-
 }
 
-
-
-
-
- 
-/* ===============================
-
-   GOOGLE DISTANCE + ETA HELPER
-
-================================ */
 
 async function getRouteInfo(pickupAddress, deliveryAddress) {
   if (!pickupAddress || !deliveryAddress) {
@@ -260,153 +240,599 @@ async function getRouteInfo(pickupAddress, deliveryAddress) {
   };
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-/* ===============================
-
-   CONFIRM ORDER API
-
-================================ */
-
 async function confirmOrder(req, res) {
+
   try {
+
     const { orderId } = req.params;
+ 
+    /* =========================================================
 
+       FETCH ORDER
+
+    ========================================================= */
+ 
     const order = await prisma.order.findFirst({
+
       where: { orderId },
+
       include: {
+
         OrderPickupAddress: true,
+
         OrderDeliveryAddress: true
+
       }
+
     });
+ 
+    if (!order) {
 
-    if (!order)
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res.status(404).json({
 
-    if (order.orderStatus !== "CREATED")
-      return res.status(400).json({ success: false, message: "Order already processed" });
+        success: false,
 
+        message: "Order not found"
+
+      });
+
+    }
+ 
+    if (order.orderStatus !== "CREATED") {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message: "Order already processed"
+
+      });
+
+    }
+ 
     const now = new Date();
+ 
+    const pickupPincode =
 
+      order.OrderPickupAddress?.pincode;
+ 
+    if (!pickupPincode) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message: "Pickup pincode missing"
+
+      });
+
+    }
+ 
+    /* =========================================================
+
+       RIDER FILTER
+
+    ========================================================= */
+ 
     const riders = await prisma.rider.findMany({
+
       where: {
+
+        isFullyRegistered: true,
+ 
         orderState: "READY",
+ 
         isOnline: true,
-        slotBookings: {
+ 
+       slotBookings: {
+
           some: {
+
             status: "BOOKED",
-            slotEndAt: { gte: now }
+ 
+            slotEndAt: {
+
+              gte: now
+
+            }
+
           }
+
+        },
+         
+        location: {
+
+          is: {
+
+            pincode: pickupPincode
+
+          }
+
         }
+
       },
+ 
       take: 10,
-      select: { id: true }
+ 
+      select: {
+
+        id: true,
+ 
+        isFullyRegistered: true,
+ 
+        location: {
+
+          select: {
+
+            pincode: true
+
+          }
+
+        }
+
+      }
+
     });
+ 
+    console.log(
 
-    if (!riders.length)
-      return res.status(400).json({ success: false, message: "No riders available" });
+      "✅ Eligible Riders:",
 
-    const routeInfo = await getRouteInfo(
-      order.OrderPickupAddress,
-      order.OrderDeliveryAddress
+      riders.map(r => ({
+
+        id: r.id,
+
+        isFullyRegistered: r.isFullyRegistered,
+
+        pincode: r.location?.pincode
+
+      }))
+
     );
+ 
+    if (!riders.length) {
 
-    const basePay = 40;
-    const distancePay = routeInfo.distanceKm * 5;
-    const surgePay = 0;
-    const totalEarning = basePay + distancePay + surgePay;
+      return res.status(400).json({
 
+        success: false,
+
+        message: "No riders available"
+
+      });
+
+    }
+ 
+    /* =========================================================
+
+       ROUTE INFO
+
+    ========================================================= */
+ 
+    const routeInfo = await getRouteInfo(
+
+      order.OrderPickupAddress,
+
+      order.OrderDeliveryAddress
+
+    );
+ 
+    /* =========================================================
+
+       PAYOUT CONFIG
+
+    ========================================================= */
+ 
+    const payoutConfig =
+
+      await prisma.payoutConfig.findFirst({
+
+        where: {
+
+          isActive: true,
+ 
+          OR: [
+
+            {
+
+              pincodeIds: {
+
+                has: pickupPincode
+
+              }
+
+            },
+ 
+            {
+
+              pincodeIds: {
+
+                isEmpty: true
+
+              }
+
+            }
+
+          ]
+
+        },
+ 
+        orderBy: {
+
+          version: "desc"
+
+        }
+
+      });
+ 
+    if (!payoutConfig) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        message: "No payout config found"
+
+      });
+
+    }
+ 
+    const {
+
+      basePay,
+
+      perKmRate,
+
+      surgeConfig,
+
+      peakConfig,
+
+      weatherConfig
+
+    } = payoutConfig;
+ 
+    /* =========================================================
+
+       DISTANCE PAY
+
+    ========================================================= */
+ 
+    let distancePay = 0;
+ 
+    if (routeInfo.distanceKm > 4) {
+
+      distancePay =
+
+        (routeInfo.distanceKm - 4) * perKmRate;
+
+    }
+ 
+    /* =========================================================
+
+       SURGE PAY
+
+    ========================================================= */
+ 
+    let surgePay = 0;
+ 
+    if (surgeConfig?.enabled) {
+
+      const multiplier =
+
+        surgeConfig.multiplier || 1;
+ 
+      surgePay =
+
+        (basePay + distancePay) *
+
+        (multiplier - 1);
+
+    }
+ 
+    /* =========================================================
+
+       PEAK BONUS
+
+    ========================================================= */
+ 
+    let peakBonus = 0;
+ 
+    if (peakConfig?.enabled) {
+
+      const currentHour =
+
+        new Date().getHours();
+ 
+      const start = parseInt(
+
+        peakConfig.start.split(":")[0]
+
+      );
+ 
+      const end = parseInt(
+
+        peakConfig.end.split(":")[0]
+
+      );
+ 
+      if (
+
+        currentHour >= start &&
+
+        currentHour <= end
+
+      ) {
+
+        peakBonus = peakConfig.bonus || 0;
+
+      }
+
+    }
+ 
+    /* =========================================================
+
+       WEATHER BONUS
+
+    ========================================================= */
+ 
+    let weatherBonus = 0;
+ 
+    const weather = await getWeather(
+
+      order.OrderPickupAddress.latitude,
+
+      order.OrderPickupAddress.longitude
+
+    );
+ 
+    const isRaining = weather.isRaining;
+ 
+    if (
+
+      isRaining &&
+
+      weatherConfig?.RAIN
+
+    ) {
+
+      weatherBonus = weatherConfig.RAIN;
+
+    }
+ 
+    /* =========================================================
+
+       TOTAL EARNING
+
+    ========================================================= */
+ 
+    const totalEarning =
+
+      basePay +
+
+      distancePay +
+
+      surgePay +
+
+      peakBonus +
+
+      weatherBonus;
+ 
+    /* =========================================================
+
+       TRANSACTION
+
+    ========================================================= */
+ 
     await prisma.$transaction(async (tx) => {
 
-      // Update order
+      /* -------------------------
+
+         UPDATE ORDER
+
+      ------------------------- */
+ 
       await tx.order.update({
-        where: { id: order.id },   // use UUID
-        data: { orderStatus: "CONFIRMED" }
-      });
 
-      //  Create allocation
+        where: {
+
+          id: order.id
+
+        },
+ 
+        data: {
+
+          orderStatus: "CONFIRMED"
+
+        }
+
+      });
+ 
+      /* -------------------------
+
+         CREATE ORDER ALLOCATION
+
+      ------------------------- */
+ 
       await tx.orderAllocation.create({
+
         data: {
-          orderId: order.orderId,   // use UUID
-          expiresAt: new Date(Date.now() + 120000),
+
+          orderId: order.orderId,
+ 
+          expiresAt: new Date(
+
+            Date.now() + 120000
+
+          ),
+ 
           OrderCandidateRiders: {
+
             create: riders.map(r => ({
+
               riderId: r.id,
+
               status: "PENDING",
+
               notifiedAt: new Date()
+
             }))
+
           }
-        }
-      });
 
-      //  Create earning snapshot
+        }
+
+      });
+ 
+      /* -------------------------
+
+         CREATE EARNING
+
+      ------------------------- */
+ 
       await tx.orderRiderEarning.create({
+
         data: {
+
           orderId: order.orderId,
+ 
           basePay,
+ 
           distancePay,
+ 
           surgePay,
+ 
+          tips: 0,
+ 
           totalEarning,
+ 
           credited: false
-        }
-      });
 
-      //  Create tracking snapshot
+        }
+
+      });
+ 
+      /* -------------------------
+
+         CREATE TRACKING
+
+      ------------------------- */
+ 
       await tx.orderTracking.create({
+
         data: {
+
           orderId: order.orderId,
-          distanceInKm: routeInfo.distanceKm,
-          durationInMin: routeInfo.etaMinutes
+ 
+          distanceInKm:
+
+            routeInfo.distanceKm,
+ 
+          durationInMin:
+
+            routeInfo.etaMinutes
+
         }
+
       });
 
     });
+ 
+    /* =========================================================
 
-    // Notify AFTER transaction commits
-    riders.forEach(rider => {
-      notifyRider(rider.id, {
+       NOTIFY RIDERS
+
+    ========================================================= */
+ 
+    for (const rider of riders) {
+
+      await notifyRider(rider.id, {
+
         type: "ORDER_POPUP",
-        orderId: order.orderId, // send formatted ID to frontend
-        vendorShopName: order.vendorShopName,
-        pickupLocation: order.OrderPickupAddress,
-        dropLocation: order.OrderDeliveryAddress,
-        distanceKm: routeInfo.distanceKm,
-        etaMinutes: routeInfo.etaMinutes,
-        estimatedEarning: totalEarning
+ 
+        orderId: order.orderId,
+ 
+        vendorShopName:
+
+          order.vendorShopName,
+ 
+        pickupLocation:
+
+          order.OrderPickupAddress,
+ 
+        dropLocation:
+
+          order.OrderDeliveryAddress,
+ 
+        distanceKm:
+
+          routeInfo.distanceKm,
+ 
+        etaMinutes:
+
+          routeInfo.etaMinutes,
+ 
+        estimatedEarning:
+
+          totalEarning
+
       });
-    });
 
+    }
+ 
+    /* =========================================================
+
+       RESPONSE
+
+    ========================================================= */
+ 
     return res.status(200).json({
+
       success: true,
-      message: "Order confirmed and sent to riders",
+ 
+      message:
+
+        "Order confirmed and sent to riders",
+ 
       estimatedEarning: totalEarning,
+ 
       notifiedRiders: riders.length
+
+    });
+ 
+  } catch (err) {
+
+    console.error(
+
+      "❌ Confirm order error:",
+
+      err
+
+    );
+ 
+    return res.status(500).json({
+
+      success: false,
+ 
+      message:
+
+        err.message ||
+
+        "Failed to confirm order"
+
     });
 
-  } catch (err) {
-    console.error("Confirm order error:", err);
-    return res.status(500).json({
-      success: false,
-      message: err.message || "Failed to confirm order"
-    });
   }
+
 }
+ 
+
+
 
 
 async function acceptOrder(req, res) {
   try {
     const { orderId } = req.params;
     const riderId = req.rider.id;
+
 
     const order = await prisma.order.findUnique({
       where: { orderId },
@@ -419,12 +845,97 @@ async function acceptOrder(req, res) {
     if (!order.OrderAllocation)
       return res.status(400).json({ success: false, message: "Order not allocated" });
 
+
+    //////////////////////////////////////////////////////
+// FETCH RIDER
+//////////////////////////////////////////////////////
+
+const rider = await prisma.rider.findUnique({
+  where: {
+    id: riderId
+  },
+
+  select: {
+    isOnline: true,
+    orderState: true,
+    isFullyRegistered: true
+  }
+});
+
+if (!rider) {
+  return res.status(404).json({
+    success: false,
+    message: "Rider not found"
+  });
+}
+
+//////////////////////////////////////////////////////
+// VALIDATIONS
+//////////////////////////////////////////////////////
+
+    if (!rider.isFullyRegistered) {
+      return res.status(400).json({
+        success: false,
+        message: "Rider not registered"
+      });
+    }
+
+    if (!rider.isOnline) {
+      return res.status(400).json({
+        success: false,
+        message: "Rider is offline"
+      });
+    }
+
+    if (rider.orderState !== "READY") {
+      return res.status(400).json({
+        success: false,
+        message: "Rider is busy"
+      });
+    }
+
+
+
+    //////////////////////////////////////////////////////
+// SLOT VALIDATION
+//////////////////////////////////////////////////////
+
+    const now = new Date();
+
+    const activeSlotBooking =
+      await prisma.slotBooking.findFirst({
+
+        where: {
+
+          riderId,
+
+          status: "BOOKED",
+
+          slotStartAt: {
+            lte: now
+          },
+
+          slotEndAt: {
+            gte: now
+          }
+        }
+      });
+
+    if (!activeSlotBooking) {
+
+      return res.status(400).json({
+        success: false,
+        message: "No active slot booked"
+      });
+    }
+            
+
     await prisma.$transaction(async (tx) => {
 
-      //  ATOMIC STATUS UPDATE (prevents race condition)
+      // Atomic update (prevents race condition)
       const updated = await tx.order.updateMany({
         where: {
-          orderId:orderId,
+          orderId: orderId,
           orderStatus: "CONFIRMED"
         },
         data: {
@@ -471,12 +982,59 @@ async function acceptOrder(req, res) {
           currentOrderId: order.id
         }
       });
-
     });
+
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const acceptCount = await prisma.orderCandidateRider.count({
+      where: {
+        riderId,
+        status: "ACCEPTED",
+        updatedAt: {
+          gte: todayStart,
+          lte: todayEnd
+        }
+      }
+    });
+
+
+    await prisma.riderPerformance.upsert({
+      where: {
+        riderId_date: {
+          riderId,
+          date: todayStart
+        }
+      },
+      update: {
+        totalOrdersAccepted: acceptCount
+      },
+      create: {
+        riderId,
+        date: todayStart,
+
+        // required fields
+        periodStart: todayStart,
+        periodEnd: todayEnd,
+
+        totalOrdersAccepted: acceptCount,
+        totalOrdersRejected: 0,
+        totalOrdersAssigned: 0,
+
+        acceptanceRate: 0,
+        performanceScore: 0.7
+      }
+    });
+
 
     return res.json({
       success: true,
-      message: "Order accepted successfully"
+      message: "Order accepted successfully",
+      todayAcceptedOrders: acceptCount
     });
 
   } catch (err) {
@@ -490,67 +1048,105 @@ async function acceptOrder(req, res) {
 }
  
 
+
+
 async function rejectOrder(req, res) {
   try {
     const { orderId } = req.params;
     const riderId = req.rider.id;
-
-    // 1️ Find order with allocation
+ 
+    
     const order = await prisma.order.findUnique({
       where: { orderId },
-      include: {
-        OrderAllocation: true
-      }
+      include: { OrderAllocation: true }
     });
-
+ 
     if (!order) {
       return res.status(404).json({
         success: false,
         message: "Order not found"
       });
     }
-
+ 
     if (!order.OrderAllocation) {
       return res.status(400).json({
         success: false,
         message: "Order not allocated"
       });
     }
-
-    // 2️ Reject rider inside allocation
+ 
     const result = await prisma.orderCandidateRider.updateMany({
       where: {
         allocationId: order.OrderAllocation.id,
-        riderId: riderId,
+        riderId,
         status: "PENDING"
       },
       data: {
         status: "REJECTED"
       }
     });
-
+ 
     if (result.count === 0) {
       return res.status(409).json({
         success: false,
-        message: "Order already handled or not assigned to this rider"
+        message: "Order already handled or not assigned"
       });
     }
+ 
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+ 
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+ 
+    const rejectCount = await prisma.orderCandidateRider.count({
+      where: {
+        riderId,
+        status: "REJECTED",
+        updatedAt: {
+          gte: todayStart,
+          lte: todayEnd
+        }
+      }
+    });
+ 
+   
+    let warning = null;
+ 
+    if (rejectCount >= 5 && rejectCount < 10) {
+      warning = "Too many rejections today. Please accept orders.";
+    }
+ 
+    if (rejectCount >= 10) {
+      //  mark rider inactive
+      await prisma.rider.update({
+        where: { id: riderId },
+        data: {
+          isOnline: false
+        }
+      });
+ 
+      warning = " You are temporarily blocked due to high rejections";
+    }
+ 
 
     return res.json({
       success: true,
-      message: "Order rejected successfully"
+      message: "Order rejected successfully",
+      todayRejectCount: rejectCount,
+      warning
     });
-
+ 
   } catch (err) {
     console.error("Reject order error:", err);
+ 
     return res.status(500).json({
       success: false,
       message: "Failed to reject order"
     });
   }
 }
-
-
+ 
 async function getOrderDetails(req, res) {
   try {
     const { orderId } = req.params;
@@ -590,13 +1186,17 @@ async function getOrderDetails(req, res) {
       orderId: order.orderId,
       vendorShopName: order.vendorShopName,
       orderStatus: order.orderStatus,
+      totalWeight: order.totalWeight,
+      weightUnit: "kg",
 
       items: order.OrderItems.map(item => ({
         _id: item.id,
         itemName: item.itemName,
         quantity: item.quantity,
         price: item.price,
-        total: item.total
+        total: item.total,
+        weightPerUnit: item.weightPerUnit,
+        weightUnit: item.weightUnit
       })),
 
       pickupAddress: order.OrderPickupAddress
@@ -757,11 +1357,6 @@ async function pickupOrder(req, res) {
   }
 }
 
-/* ===============================
-
-   HELPER FUNCTIONS
-
-=============================== */
 
 const getDateKey = (date = new Date()) =>
 
@@ -786,21 +1381,15 @@ const getWeekKey = (date = new Date()) => {
   return `${year}-W${week}`;
 
 };
- 
+
 const isPeakSlot = (date) => {
 
   const hour = new Date(date).getHours();
 
-  return hour >= 6 && hour < 10; // example peak slot
+  return hour >= 6 && hour < 10; 
 
 };
  
-/* ===============================
-
-   DELIVER ORDER API
-
-=============================== */
-
 async function deliverOrder(req, res) {
   try {
     const { orderId } = req.params;
@@ -844,7 +1433,7 @@ async function deliverOrder(req, res) {
       });
     }
 
-    //  IMPORTANT: Ensure payment record exists BEFORE transaction
+    //Ensure payment record exists BEFORE transaction
     if (!order.OrderPayment) {
       return res.status(400).json({
         success: false,
@@ -916,6 +1505,51 @@ async function deliverOrder(req, res) {
           });
         }
 
+
+    // Get rider active slot booking
+      const now = new Date();
+
+      const slotBooking = await tx.slotBooking.findFirst({
+        where: {
+          riderId,
+          status: "BOOKED",
+
+          slotStartAt: {
+            lte: now,
+          },
+
+          slotEndAt: {
+            gte: now,
+          },
+        },
+      });
+
+
+        await tx.orderSlotInfo.upsert({
+        where: { orderId },
+
+        update: {
+          slotBookingId: slotBooking?.id,
+          slotId: slotBooking?.slotId,
+          isSlotBooked: true,
+          isPeakSlot: slotBooking?.isPeakSlot,
+          slotStartAt: slotBooking?.slotStartAt,
+          slotEndAt: slotBooking?.slotEndAt,
+        },
+
+        create: {
+          orderId,
+          slotBookingId: slotBooking?.id,
+          slotId: slotBooking?.slotId,
+          isSlotBooked: true,
+          isPeakSlot: slotBooking?.isPeakSlot,
+          slotStartAt: slotBooking?.slotStartAt,
+          slotEndAt: slotBooking?.slotEndAt,
+        },
+      });
+
+
+
         //  Update order
         await tx.order.update({
           where: { orderId },
@@ -928,6 +1562,19 @@ async function deliverOrder(req, res) {
           data: { status: "SUCCESS" },
         });
 
+        //     await tx.orderSlotInfo.upsert({
+        //   where: { orderId },
+        //   update: {
+        //     isSlotBooked: false,
+        //   },
+        //   create: {
+        //     orderId,
+        //     isSlotBooked: false,
+        //   },
+        // });
+
+        
+
         //  Reset rider state
         await tx.rider.update({
           where: { id: riderId },
@@ -939,11 +1586,15 @@ async function deliverOrder(req, res) {
       },
       { timeout: 10000 }
     );
-
+await processOrderIncentive({
+  riderId,
+  orderId
+});
     return res.status(200).json({
       success: true,
       message: "Order delivered successfully",
       orderId,
+      orderStatus: "DELIVERED",
       earningCredited: earning,
       codCollected,
     });
@@ -981,9 +1632,7 @@ async function cancelOrder(req, res) {
       });
     }
 
-    /* ===============================
-       1️  FETCH ORDER
-    =============================== */
+   
     const order = await prisma.order.findUnique({
       where: { orderId }
     });
@@ -995,9 +1644,7 @@ async function cancelOrder(req, res) {
       });
     }
 
-    /* ===============================
-       2️  VALIDATE STATE
-    =============================== */
+   
     if (["DELIVERED", "CANCELLED"].includes(order.orderStatus)) {
       return res.status(400).json({
         success: false,
@@ -1011,11 +1658,6 @@ async function cancelOrder(req, res) {
         message: "Order has no assigned rider"
       });
     }
-
-    /* ===============================
-       3️ VALIDATE RIDER ASSIGNMENT
-    =============================== */
-
 
     if (order.riderId !== riderId) {
       return res.status(403).json({
@@ -1042,14 +1684,14 @@ async function cancelOrder(req, res) {
   });
 
   await tx.orderCancelIssue.upsert({
-    where: { orderId: order.id }, 
+    where: { orderId:  order.orderId }, 
     update: {
       cancelledBy: "RIDER",
       reasonCode,
       reasonText
     },
     create: {
-      orderId: order.id, 
+      orderId:  order.orderId, 
       cancelledBy: "RIDER",
       reasonCode,
       reasonText
@@ -1060,18 +1702,12 @@ async function cancelOrder(req, res) {
 });
 
 
-    /* ===============================
-       6️ WS NOTIFICATION
-    =============================== */
     notifyRider(riderId, {
       type: "ORDER_CANCELLED",
       orderId,
       reason: reasonCode
     });
 
-    /* ===============================
-       7️  RESPONSE
-    =============================== */
     return res.status(200).json({
       success: true,
       message: "Order cancelled successfully",
@@ -1092,10 +1728,6 @@ async function cancelOrder(req, res) {
     });
   }
 }
-
-
-
-
 
 async function getOrdersByRider(req, res) {
   try {
@@ -1202,7 +1834,6 @@ async function getDeliveredOrdersByRider(req, res) {
 }
 
 
-
 async function getCancelledOrdersByRider(req, res) {
   try {
     const riderId = req.rider._id;
@@ -1228,13 +1859,287 @@ async function getCancelledOrdersByRider(req, res) {
   }
 }
 
- 
+// async function getSurgeStatus(req, res)  {
 
- 
+//   try {
 
- 
- 
- 
-module.exports = { createOrder,confirmOrder,acceptOrder,rejectOrder,getOrderDetails,pickupOrder,deliverOrder, cancelOrder,getOrdersByRider,getDeliveredOrdersByRider,getCancelledOrdersByRider};
+//     //////////////////////////////////////////////////////
+//     // RIDER ID FROM TOKEN
+//     //////////////////////////////////////////////////////
+
+//     const riderId = req.rider.id;
+
+//     //////////////////////////////////////////////////////
+//     // FETCH RIDER
+//     //////////////////////////////////////////////////////
+
+//     const rider = await prisma.rider.findUnique({
+//       where: {
+//         id: riderId
+//       },
+
+//       include: {
+//         location: true
+//       }
+//     });
+
+//     if (!rider) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Rider not found"
+//       });
+//     }
+
+//     const pincode = rider.location?.pincode;
+
+//     const lat = rider.location?.latitude;
+
+//     const lng = rider.location?.longitude;
+
+//     console.log(rider);
+// console.log(rider.location);
+
+//     if (!pincode || !lat || !lng) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Rider location incomplete"
+//       });
+//     }
+
+//     //////////////////////////////////////////////////////
+//     // FETCH PAYOUT CONFIG
+//     //////////////////////////////////////////////////////
+
+//     const payoutConfig =
+//       await prisma.payoutConfig.findFirst({
+
+//         where: {
+//           isActive: true,
+
+//           pincodeIds: {
+//             has: pincode
+//           }
+//         },
+
+//         orderBy: {
+//           version: "desc"
+//         }
+//       });
+
+//     if (!payoutConfig) {
+
+//       return res.status(200).json({
+//         success: true,
+
+//         data: {
+//           surgeActive: false,
+//           surgeAmount: 0
+//         }
+//       });
+//     }
+
+//     //////////////////////////////////////////////////////
+//     // WEATHER CHECK
+//     //////////////////////////////////////////////////////
+
+//     const weather =
+//       await getWeather(lat, lng);
+
+//     //////////////////////////////////////////////////////
+//     // SURGE LOGIC
+//     //////////////////////////////////////////////////////
+
+//     let surgeActive = false;
+
+//     let multiplier = 1;
+
+//     if (
+//       weather.isRaining &&
+//       payoutConfig.surgeConfig?.enabled
+//     ) {
+
+//       surgeActive = true;
+
+//       multiplier =
+//         payoutConfig.surgeConfig.multiplier || 1.5;
+//     }
+
+//     //////////////////////////////////////////////////////
+//     // SURGE AMOUNT
+//     //////////////////////////////////////////////////////
+
+//     let surgeAmount = 0;
+
+//     if (surgeActive) {
+
+//       surgeAmount =
+//         payoutConfig.basePay *
+//         (multiplier - 1);
+//     }
+
+//     //////////////////////////////////////////////////////
+//     // RESPONSE
+//     //////////////////////////////////////////////////////
+
+//     return res.status(200).json({
+//       success: true,
+
+//       data: {
+
+//         riderId,
+
+//         pincode,
+
+//         weather: {
+//           isRaining: weather.isRaining
+//         },
+
+//         surgeActive,
+
+//         multiplier,
+
+//         surgeAmount
+//       }
+//     });
+
+//   } catch (err) {
+
+//     console.error(err);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: err.message
+//     });
+//   }
+// };
+
+async function getSurgeStatus(req, res) {
+
+  try {
+
+    //////////////////////////////////////////////////////
+    // RIDER FROM TOKEN
+    //////////////////////////////////////////////////////
+
+    const riderId = req.rider.id;
+
+    //////////////////////////////////////////////////////
+    // FETCH RIDER
+    //////////////////////////////////////////////////////
+
+    const rider = await prisma.rider.findUnique({
+      where: {
+        id: riderId
+      },
+
+      include: {
+        location: true
+      }
+    });
+
+    if (!rider || !rider.location?.pincode) {
+      return res.status(400).json({
+        success: false,
+        message: "Rider pincode not found"
+      });
+    }
+
+    const pincode = rider.location.pincode;
+
+    //////////////////////////////////////////////////////
+    // FETCH PAYOUT CONFIG
+    //////////////////////////////////////////////////////
+
+    const payoutConfig =
+      await prisma.payoutConfig.findFirst({
+
+        where: {
+          isActive: true,
+
+          pincodeIds: {
+            has: pincode
+          }
+        },
+
+        orderBy: {
+          version: "desc"
+        }
+      });
+
+    //////////////////////////////////////////////////////
+    // NO CONFIG
+    //////////////////////////////////////////////////////
+
+    if (!payoutConfig) {
+
+      return res.status(200).json({
+        success: true,
+
+        data: {
+          surgeActive: false,
+          surgeAmount: 0
+        }
+      });
+    }
+
+    //////////////////////////////////////////////////////
+    // SURGE LOGIC
+    //////////////////////////////////////////////////////
+
+    const surgeConfig =
+      payoutConfig.surgeConfig || {};
+
+    const surgeActive =
+      surgeConfig.enabled === true;
+
+    //////////////////////////////////////////////////////
+    // SURGE AMOUNT
+    //////////////////////////////////////////////////////
+
+    let surgeAmount = 0;
+
+    if (surgeActive) {
+
+      const multiplier =
+        surgeConfig.multiplier || 1;
+
+      surgeAmount =
+        payoutConfig.basePay *
+        (multiplier - 1);
+    }
+
+    //////////////////////////////////////////////////////
+    // RESPONSE
+    //////////////////////////////////////////////////////
+
+    return res.status(200).json({
+      success: true,
+
+      data: {
+
+      
+
+        surgeActive,
+
+        multiplier:
+          surgeConfig.multiplier || 1,
+
+        surgeAmount
+      }
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};
+
+
+module.exports = { createOrder,confirmOrder,acceptOrder,rejectOrder,getOrderDetails,pickupOrder,deliverOrder, cancelOrder,getOrdersByRider,getDeliveredOrdersByRider,getCancelledOrdersByRider,getSurgeStatus};
  
  

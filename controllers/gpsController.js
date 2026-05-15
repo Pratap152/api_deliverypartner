@@ -17,7 +17,7 @@ exports.getBestRoute = async function getRouteEstimate(req, res) {
       params: {
         origin: `${originLat},${originLng}`,
         destination: `${destLat},${destLng}`,
-        alternatives: true, // 🔥 multiple routes
+        alternatives: true, 
         mode: "driving",
         key: GOOGLE_KEY
       }
@@ -30,11 +30,11 @@ exports.getBestRoute = async function getRouteEstimate(req, res) {
         routeIndex: index + 1,
         distance: {
           text: leg.distance.text,
-          value: leg.distance.value // meters
+          value: leg.distance.value 
         },
         duration: {
           text: leg.duration.text,
-          value: leg.duration.value // seconds
+          value: leg.duration.value 
         },
         estimatedArrivalTime: new Date(
           Date.now() + leg.duration.value * 1000

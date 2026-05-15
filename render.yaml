@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: rider-module-api
+    runtime: node
+
+    plan: free
+    branch: dev
+
+    buildCommand: |
+      npm install
+      npx prisma generate
+
+    startCommand: npm start
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: DATABASE_URL
+        sync: false

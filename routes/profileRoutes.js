@@ -3,7 +3,6 @@ const router=express.Router();
 const { riderAuthMiddleWare } = require("../middleware/riderAuthMiddleware");
 const {getProfile}=require('../controllers/profileController')
 const {getBankDetails}=require('../controllers/bankDetailsController')
-const {getKitAddress}=require('../controllers/kitAddressController')
 const uploadSelfie = require("../middleware/uploadSelfie");
 const { upload } = require("../utils/azureUpload");
 
@@ -279,7 +278,6 @@ router.get("/rider/profile", riderAuthMiddleWare, getProfile);
  */
 
 router.get("/bank-details", riderAuthMiddleWare, getBankDetails_profile);
-// Get kit address
  
 /**
  * @swagger
@@ -747,36 +745,26 @@ router.put(
   ]),
   updateDocuments
 );
+
 /**
  * @swagger
  * /api/profile/orders/history:
  *   get:
+ *     summary: Get rider delivered order history
+ *     description: Fetch rider delivered orders with earnings, ratings, distance, and order details.
  *     tags:
  *       - Profile
- *     summary: Get rider delivered order history
- *     description: >
- *       Fetch delivered order history of the logged-in rider.
- *       Supports multiple time-based filters.
- *
- *       **Filters**
- *       - `all` → All delivered orders
- *       - `daily` → Today’s delivered orders
- *       - `weekly` → Last 7 days delivered orders
- *       - `monthly` → Current month delivered orders
- *
  *     security:
  *       - bearerAuth: []
- *
  *     parameters:
  *       - in: query
  *         name: filter
- *         required: false
  *         schema:
  *           type: string
  *           enum: [all, daily, weekly, monthly]
- *           default: all
- *         description: Filter order history by date range
- *
+ *         required: false
+ *         description: Filter orders by date range
+ *         example: monthly
  *     responses:
  *       200:
  *         description: Rider order history fetched successfully
@@ -790,19 +778,19 @@ router.put(
  *                   example: true
  *                 filter:
  *                   type: string
- *                   example: weekly
+ *                   example: monthly
  *                 totalOrders:
  *                   type: integer
- *                   example: 15
- *                 totalEarnings:
+ *                   example: 57
+ *                 totalRiderEarnings:
  *                   type: number
- *                   example: 2450
+ *                   example: 4069.05
  *                 totalDistance:
  *                   type: number
- *                   example: 72.3
+ *                   example: 357.81
  *                 avgRating:
- *                   type: string
- *                   example: "4.5"
+ *                   type: number
+ *                   example: 4.5
  *                 data:
  *                   type: array
  *                   items:
@@ -810,7 +798,8 @@ router.put(
  *                     properties:
  *                       orderId:
  *                         type: string
- *                         example: ORD-123456
+ *                         example: ORD-A76D2A14
+ *
  *                       items:
  *                         type: array
  *                         items:
@@ -818,56 +807,93 @@ router.put(
  *                           properties:
  *                             itemName:
  *                               type: string
- *                               example: Veg Burger
+ *                               example: Basmati Rice
  *                             quantity:
  *                               type: integer
  *                               example: 2
  *                             price:
  *                               type: number
- *                               example: 120
+ *                               example: 60
  *                             total:
  *                               type: number
- *                               example: 240
+ *                               example: 120
+ *
  *                       pricing:
  *                         type: object
  *                         properties:
  *                           itemTotal:
  *                             type: number
- *                             example: 240
+ *                             example: 120
  *                           deliveryFee:
  *                             type: number
  *                             example: 40
  *                           tax:
  *                             type: number
- *                             example: 12
+ *                             example: 5
  *                           platformCommission:
  *                             type: number
- *                             example: 18
+ *                             example: 10
  *                           totalAmount:
  *                             type: number
- *                             example: 310
- *                       customerTip:
- *                         type: number
- *                         example: 20
+ *                             example: 165
+ *                           riderEarning:
+ *                             type: number
+ *                             example: 70.85
+ *                           earningBreakup:
+ *                             type: object
+ *                             properties:
+ *                               basePay:
+ *                                 type: number
+ *                                 example: 40
+ *                               distancePay:
+ *                                 type: number
+ *                                 example: 30.85
+ *                               surgePay:
+ *                                 type: number
+ *                                 example: 0
+ *                               tips:
+ *                                 type: number
+ *                                 example: 0
+ *                               totalEarning:
+ *                                 type: number
+ *                                 example: 70.85
+ *                               credited:
+ *                                 type: boolean
+ *                                 example: true
+ *                               creditedAt:
+ *                                 type: string
+ *                                 format: date-time
+ *                                 example: 2026-05-06T06:38:14.497Z
+ *
  *                       distanceTravelled:
  *                         type: number
- *                         example: 5.6
+ *                         example: 6.17
+ *
  *                       durationInMin:
- *                         type: number
- *                         example: 28
+ *                         type: integer
+ *                         example: 15
+ *
  *                       pickupAddress:
  *                         type: string
- *                         example: MG Road, Bengaluru
+ *                         example: Madhapur, Hyderabad
+ *
  *                       deliveredAddress:
  *                         type: string
- *                         example: Whitefield, Bengaluru
+ *                         example: Kukatpally, Hyderabad
+ *
  *                       rating:
  *                         type: number
- *                         example: 5
+ *                         example: 4.5
+ *
+ *                       review:
+ *                         type: string
+ *                         nullable: true
+ *                         example: Good delivery service
+ *
  *                       deliveredAt:
  *                         type: string
  *                         format: date-time
- *                         example: "2026-01-07T10:15:00.000Z"
+ *                         example: 2026-05-06T06:38:14.524Z
  *
  *       400:
  *         description: Rider ID missing
@@ -883,13 +909,23 @@ router.put(
  *                   type: string
  *                   example: Rider ID missing
  *
- *       401:
- *         description: Unauthorized
- *
  *       500:
- *         description: Server error
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Server error
+ *                 error:
+ *                   type: string
+ *                   example: Internal server error
  */
-
 router.get(
   "/orders/history",
   riderAuthMiddleWare,

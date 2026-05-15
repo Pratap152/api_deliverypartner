@@ -1,12 +1,5 @@
-const Rider = require("../models/RiderModel");
-const Order = require("../models/OrderSchema");
 const jwt = require("jsonwebtoken");
 const prisma=require('../config/prisma');
-
-
-
-
-
 
 exports.handoverCodCash = async (req, res) => {
   try {
@@ -27,7 +20,7 @@ exports.handoverCodCash = async (req, res) => {
       });
     }
 
-    /* ✅ FETCH DELIVERED COD ORDERS (NOT FULLY DEPOSITED) */
+    /* FETCH DELIVERED COD ORDERS (NOT FULLY DEPOSITED) */
     const codOrders = await prisma.order.findMany({
       where: {
         riderId,
@@ -57,7 +50,7 @@ exports.handoverCodCash = async (req, res) => {
       });
     }
 
-    /* ✅ CALCULATE TOTAL PENDING */
+    /*  CALCULATE TOTAL PENDING */
     let totalPending = 0;
 
     for (const order of codOrders) {
@@ -75,7 +68,7 @@ exports.handoverCodCash = async (req, res) => {
       });
     }
 
-    /* ❌ NO PARTIAL DEPOSIT ALLOWED */
+    /*  NO PARTIAL DEPOSIT ALLOWED */
     if (Number(amount) !== totalPending) {
       return res.status(400).json({
         success: false,
@@ -83,11 +76,11 @@ exports.handoverCodCash = async (req, res) => {
       });
     }
 
-    /* ✅ UPDATE ALL ORDERS TO DEPOSITED */
+    /*  UPDATE ALL ORDERS TO DEPOSITED */
     await prisma.$transaction(
   codOrders.map((order) =>
     prisma.orderCod.update({
-      where: { id: order.OrderCod.id },   // ✅ FIXED HERE
+      where: { id: order.OrderCod.id },   
       data: {
         status: "DEPOSITED",
         depositedAmount: order.OrderCod.pendingAmount,
@@ -103,7 +96,7 @@ exports.handoverCodCash = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 handoverCodCash error:", error);
+    console.error(" handoverCodCash error:", error);
 
     return res.status(500).json({
       success: false,
@@ -113,7 +106,7 @@ exports.handoverCodCash = async (req, res) => {
 };
 exports.withdrawFromWallet = async (req, res) => {
   try {
-    // ✅ Safely resolve riderId
+    //  Safely resolve riderId
     let riderId = req.rider?._id;
 
     if (!riderId && req.headers.authorization?.startsWith("Bearer ")) {
@@ -131,7 +124,7 @@ exports.withdrawFromWallet = async (req, res) => {
 
     const { amount } = req.body;
 
-    // 1️⃣ Validate amount
+    // 1Validate amount
     if (!amount || amount <= 0) {
       return res.status(400).json({
         success: false,
@@ -139,7 +132,7 @@ exports.withdrawFromWallet = async (req, res) => {
       });
     }
 
-    // 2️⃣ Fetch rider wallet
+    //  Fetch rider wallet
     const rider = await Rider.findById(riderId)
       .select("wallet")
       .lean();
@@ -153,7 +146,7 @@ exports.withdrawFromWallet = async (req, res) => {
 
     const availableBalance = rider.wallet?.balance || 0;
 
-    // 3️⃣ Business rules
+    //  Business rules
     if (amount < 500) {
       return res.status(400).json({
         success: false,
@@ -168,15 +161,15 @@ exports.withdrawFromWallet = async (req, res) => {
       });
     }
 
-    // 4️⃣ Calculate new balance
+    //  Calculate new balance
     const updatedBalance = availableBalance - amount;
 
-    // 5️⃣ Generate transaction ID
+    //  Generate transaction ID
     const transactionId = `WD-${Date.now()}-${Math.floor(
       Math.random() * 1000
     )}`;
 
-    // 6️⃣ Save transaction
+    //  Save transaction
     await WalletTransaction.create({
       riderId,
       transactionId,
@@ -186,13 +179,13 @@ exports.withdrawFromWallet = async (req, res) => {
       status: "SUCCESS"
     });
 
-    // 7️⃣ Update rider wallet
+    // Update rider wallet
     await Rider.updateOne(
       { _id: riderId },
       { $set: { "wallet.balance": updatedBalance } }
     );
 
-    // 8️⃣ Response
+    //  Response
     return res.status(200).json({
       success: true,
       message: "Withdrawal successful",

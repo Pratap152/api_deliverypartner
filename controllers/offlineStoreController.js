@@ -34,9 +34,7 @@ exports.createOfflineStore = async (req, res) => {
   }
 };
 
-// ===================================================
-// GET ALL ACTIVE OFFLINE STORES (RIDER APP)
-// ===================================================
+
 exports.getOfflineStores = async (req, res) => {
   try {
     const stores = await OfflineStore.find({ isActive: true })

@@ -1,11 +1,9 @@
-
 const prisma=require('../config/prisma');
-
 
 exports.markDelivered = async (req, res) => {
   try {
 
-    // ✅ KEEP AS ObjectId
+    // KEEP AS ObjectId
     const riderId = req.rider._id;
     const { orderId } = req.body;
 
@@ -39,9 +37,8 @@ exports.markDelivered = async (req, res) => {
       });
     }
 
-    // -----------------------------
-    // UPDATE ORDER
-    // -----------------------------
+    //  UPDATE ORDER
+  
 
     order.orderStatus = "DELIVERED";
     order.riderEarning.credited = true;
@@ -55,9 +52,8 @@ exports.markDelivered = async (req, res) => {
     // IST SAFE DATE
     const today = new Date().toLocaleDateString("en-CA");
 
-    // -----------------------------
-    // DAILY STATS
-    // -----------------------------
+    //  DAILY STATS
+   
 
     await RiderDailyStats.findOneAndUpdate(
       { riderId, date: today },
@@ -74,9 +70,8 @@ exports.markDelivered = async (req, res) => {
       { upsert: true }
     );
 
-    // -----------------------------
     // SLOT HISTORY
-    // -----------------------------
+
 
     const slotType = order.slotType || "NORMAL";
 
@@ -96,9 +91,8 @@ exports.markDelivered = async (req, res) => {
       { upsert: true }
     );
 
-    // -----------------------------
-    // COD CASH HANDLING
-    // -----------------------------
+    //  COD CASH HANDLING
+   
 
     let cashLimitExceeded = false;
 
@@ -155,9 +149,8 @@ exports.markDelivered = async (req, res) => {
   }
 };
 
-// ==============================
-// DASHBOARD (GET)
-// ==============================
+//  DASHBOARD (GET)
+
 
 exports.getDashboard = async (req, res) => {
   try {
@@ -185,9 +178,8 @@ exports.getDashboard = async (req, res) => {
   }
 };
 
-// ==============================
 // ORDERS HISTORY (GET)
-// ==============================
+
 
 exports.getOrders = async (req, res) => {
   try {
@@ -227,9 +219,8 @@ exports.getOrders = async (req, res) => {
   }
 };
 
-// ==============================
 // SLOT HISTORY (GET)
-// ==============================
+
 
 exports.getSlotHistory = async (req, res) => {
   try {
@@ -276,7 +267,7 @@ exports.getCashInHand = async (req, res) => {
       where: {
         riderId,
         OrderPayment: {
-          mode: "COD", // ✅ relation filter (correct way)
+          mode: "COD", 
         },
       },
       include: {
@@ -298,7 +289,7 @@ exports.getCashInHand = async (req, res) => {
     const cashOrderHistory = [];
 
     for (const order of orders) {
-      // ✅ SAFE TOTAL AMOUNT
+      // SAFE TOTAL AMOUNT
       const totalAmount =
         Number(order.OrderCod?.amount) ||
         Number(order.OrderPricing?.totalAmount) ||
@@ -387,7 +378,7 @@ exports.getWallet = async (req, res) => {
   try {
     const riderId = req.rider._id;
 
-    // 1️⃣ Fetch rider info
+    // 1️Fetch rider info
     const rider = await Rider.findById(riderId)
       .select("wallet cashInHand bankDetails")
       .lean();
@@ -399,7 +390,7 @@ exports.getWallet = async (req, res) => {
       });
     }
 
-    // 2️⃣ Calculate pending COD from delivered orders
+    // Calculate pending COD from delivered orders
     const codOrders = await Order.find({
       riderId,
       "payment.mode": "COD",
@@ -412,7 +403,7 @@ exports.getWallet = async (req, res) => {
       0
     );
 
-    // 3️⃣ Determine actions
+    // Determine actions
     const actions = {
       canWithdraw: rider.wallet.balance >= 500, // Minimum withdrawal threshold
       canAddMoney: true,
@@ -423,7 +414,7 @@ exports.getWallet = async (req, res) => {
       )
     };
 
-    // 4️⃣ Build response
+    //  Build response
     return res.status(200).json({
       success: true,
       data: {

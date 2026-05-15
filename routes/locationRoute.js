@@ -31,8 +31,8 @@ locationRouter.get("/cities", getCities);
  * @swagger
  * /api/location/areas:
  *   get:
- *     summary: Get all areas for a selected city
- *     description: Returns areas based on the city selected by the user.
+ *     summary: Get all pincodes and areas for a selected city
+ *     description: Returns pincodes with their respective areas based on the selected city.
  *     tags:
  *       - Location
  *     parameters:
@@ -44,16 +44,19 @@ locationRouter.get("/cities", getCities);
  *         description: Name of the city
  *     responses:
  *       200:
- *         description: Successfully fetched areas
+ *         description: Successfully fetched pincodes and areas
  *         content:
  *           application/json:
  *             example:
  *               success: true
  *               city: Hyderabad
- *               areas:
- *                 - Madhapur
- *                 - Hitech City
- *                 - Gachibowli
+ *               pincodes:
+ *                 - code: "500032"
+ *                   name: "Gachibowli"
+ *                   areas:
+ *                     - Gachibowli Main
+ *                     - Financial District
+ *                     - Nanakramguda
  *       400:
  *         description: City missing / invalid query
  *       404:

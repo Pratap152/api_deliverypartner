@@ -1,8 +1,5 @@
 
 
-
-
-
 const prisma = require("../config/prisma");
 
 const { extractTextFromImage } = require("../utils/ocr");
@@ -12,8 +9,8 @@ const {
   extractDLExpiry,
   
 } = require("../utils/kycParser");
-const { uploadToAzure } = require("../utils/azureUpload"); // path adjust
-const SlotBooking = require("../models/SlotBookingModel");
+const { uploadToAzure } = require("../utils/azureUpload"); 
+
 
 exports.getProfile = async (req, res) => {
   try {
@@ -99,7 +96,7 @@ exports.getProfile = async (req, res) => {
     console.error("Get Clean Profile Error:", err);
     return res.status(500).json({
       success: false,
-      message: "Server error",
+      message: err.message
     });
   }
 };
@@ -330,13 +327,13 @@ exports.getMyAssetsSummary = async (req, res) => {
       });
     }
 
-    // 🔹 Count BAD assets
+    //  Count BAD assets
     const badConditionCount = (doc.assets || []).reduce(
       (count, asset) => (asset.condition === "BAD" ? count + 1 : count),
       0,
     );
 
-    // 🔹 OPTIONAL: return only OPEN issues
+    //  OPTIONAL: return only OPEN issues
     const issues = (doc.issues || []).filter(
       (issue) => issue.status === "OPEN",
     );
@@ -613,13 +610,23 @@ const normalizeDate = (inputDate) => {
   return d.toISOString().slice(0, 10);
 };
 
+
+
 exports.getSlotHistory = async (req, res) => {
   try {
-    const riderId = req.rider.id;
-    const { filter, date, month, year } = req.query;
+    const riderId = req.rider?.id;
+    const { filter, month, year } = req.query;
+
+    if (!riderId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized rider",
+      });
+    }
 
     let dateFilter = {};
 
+    // DAILY FILTER
     if (filter === "daily") {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -631,134 +638,253 @@ exports.getSlotHistory = async (req, res) => {
         gte: start,
         lte: end,
       };
-    } else if (filter === "weekly") {
+    }
+
+    // WEEKLY FILTER
+    else if (filter === "weekly") {
       const start = new Date();
       start.setDate(start.getDate() - 6);
       start.setHours(0, 0, 0, 0);
 
-      dateFilter.slotStartAt = {
-        gte: start,
-        lte: new Date(),
-      };
-    } else if (filter === "monthly") {
-      const y = Number(year) || new Date().getFullYear();
-      const m = Number(month) - 1 || new Date().getMonth(); // IMPORTANT: month index fix
-
-      const start = new Date(y, m, 1);
-      const end = new Date(y, m + 1, 0, 23, 59, 59);
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
 
       dateFilter.slotStartAt = {
         gte: start,
         lte: end,
       };
     }
+
+    // MONTHLY FILTER
+    else if (filter === "monthly") {
+      const y = Number(year) || new Date().getFullYear();
+
+      const m =
+        month !== undefined && month !== ""
+          ? Number(month) - 1
+          : new Date().getMonth();
+
+      const start = new Date(y, m, 1);
+
+      const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+
+      dateFilter.slotStartAt = {
+        gte: start,
+        lte: end,
+      };
+    }
+
+    // FETCH BOOKINGS
     const bookings = await prisma.slotBooking.findMany({
       where: {
         riderId,
         ...dateFilter,
       },
+
+      orderBy: {
+        slotStartAt: "desc",
+      },
     });
 
+    // EMPTY RESPONSE
     if (!bookings.length) {
-      return res.json({
+      return res.status(200).json({
         success: true,
         filter: filter || "all",
+
+        bookedSlotsCount: 0,
+        completedSlotsCount: 0,
+        missedSlotsCount: 0,
+        cancelledSlotsCount: 0,
         totalSlots: 0,
         totalEarnings: 0,
+
         data: [],
       });
     }
-    const dates = bookings.map((b) => b.date).sort();
 
-    const dayStart = new Date(`${dates[0]}T00:00:00.000Z`);
-    const dayEnd = new Date(`${dates[dates.length - 1]}T23:59:59.999Z`);
+    // GET MIN/MAX SLOT RANGE
+    const minSlotStart = new Date(
+      Math.min(
+        ...bookings.map((b) =>
+          new Date(b.slotStartAt).getTime()
+        )
+      )
+    );
 
+    const maxSlotEnd = new Date(
+      Math.max(
+        ...bookings.map((b) =>
+          new Date(b.slotEndAt).getTime()
+        )
+      )
+    );
+
+    // FETCH ORDERS BETWEEN SLOT RANGE
     const allOrders = await prisma.order.findMany({
       where: {
         riderId,
-        createdAt: { gte: dayStart, lte: dayEnd },
+
+        createdAt: {
+          gte: minSlotStart,
+          lte: maxSlotEnd,
+        },
       },
+
       include: {
         OrderRiderEarning: true,
       },
     });
 
-    const ordersByDate = {};
-
-    allOrders.forEach((order) => {
-      const d = new Date(order.createdAt).toISOString().slice(0, 10);
-
-      if (!ordersByDate[d]) {
-        ordersByDate[d] = [];
-      }
-
-      ordersByDate[d].push(order);
-    });
-
     let totalEarnings = 0;
-    const data = [];
 
-    for (const booking of bookings) {
-      // const orders = ordersByDate[booking.date] || [];
-      const slotStart = booking.slotStartAt;
-      const slotEnd = booking.slotEndAt;
+    // SLOT MAPPING
+    const data = bookings.map((booking) => {
+      const slotStartMs = new Date(
+        booking.slotStartAt
+      ).getTime();
 
+      const slotEndMs = new Date(
+        booking.slotEndAt
+      ).getTime();
+
+      // MATCH ORDERS INSIDE SLOT
       const slotOrders = allOrders.filter((order) => {
-        const orderTime = order.createdAt;
-        return orderTime >= slotStart && orderTime <= slotEnd;
+        const orderMs = new Date(
+          order.deliveredAt ||
+          order.updatedAt ||
+          order.createdAt
+        ).getTime();
+
+        return (
+          orderMs >= slotStartMs &&
+          orderMs < slotEndMs
+        );
       });
-      const completed = slotOrders.filter(
-        (o) => o.orderStatus?.toUpperCase() === "DELIVERED",
+      // COMPLETED ORDERS
+      const completedOrders = slotOrders.filter(
+        (order) =>
+          order.orderStatus?.toUpperCase() ===
+          "DELIVERED"
       );
 
-      const canceled = slotOrders.filter(
-        (o) => o.orderStatus?.toUpperCase() === "CANCELLED",
+      // CANCELLED ORDERS
+      const canceledOrders = slotOrders.filter(
+        (order) =>
+          order.orderStatus?.toUpperCase() ===
+          "CANCELLED"
       );
 
-      const slotEarnings = completed.reduce(
-        (sum, o) => sum + Number(o.OrderRiderEarning?.totalEarning || 0),
-        0,
+      // SLOT EARNINGS
+      const slotEarnings = completedOrders.reduce(
+        (sum, order) => {
+          return (
+            sum +
+            Number(
+              order.OrderRiderEarning?.totalEarning || 0
+            )
+          );
+        },
+        0
       );
 
       totalEarnings += slotEarnings;
 
-      let slotStatus = "ACTIVE";
+      // SLOT STATUS
+      // SLOT STATUS
+let slotStatus = "ACTIVE";
 
-      if (
-        booking.status === "CANCELLED_BY_RIDER" ||
-        booking.status === "CANCELLED_BY_SYSTEM"
-      ) {
-        slotStatus = "CANCELLED";
-      } else if (booking.slotEndAt < new Date()) {
-        slotStatus = "COMPLETED";
-      }
+// CANCELLED
+if (
+  booking.status === "CANCELLED_BY_RIDER" ||
+  booking.status === "CANCELLED_BY_SYSTEM"
+) {
+  slotStatus = "CANCELLED";
+}
 
-      data.push({
+// SLOT TIME OVER
+else if (slotEndMs < Date.now()) {
+
+  // COMPLETED SLOT
+  if (completedOrders.length > 0) {
+    slotStatus = "COMPLETED";
+  }
+
+  // MISSED SLOT
+  else {
+    slotStatus = "MISSED";
+  }
+}
+
+      return {
         slotBookingId: booking.id,
+
         date: booking.date,
+
         startTime: booking.startTime,
         endTime: booking.endTime,
-        slotStatus,
-        totalOrders: slotOrders.length,
-        completedOrders: completed.length,
-        canceledOrders: canceled.length,
-        slotEarnings: Number(slotEarnings.toFixed(2)),
-      });
-    }
 
-    return res.json({
-      success: true,
-      filter: filter || "all",
-      totalSlots: data.length,
-      totalEarnings,
-      data,
+        slotStartAt: booking.slotStartAt,
+        slotEndAt: booking.slotEndAt,
+
+        slotStatus,
+
+        totalOrders: slotOrders.length,
+
+        completedOrders: completedOrders.length,
+
+        canceledOrders: canceledOrders.length,
+
+        slotEarnings: Number(
+          slotEarnings.toFixed(2)
+        ),
+      };
     });
+
+ // COUNTS
+const bookedSlotsCount = data.length;
+
+const completedSlotsCount = data.filter(
+  (slot) => slot.slotStatus === "COMPLETED"
+).length;
+
+const missedSlotsCount = data.filter(
+  (slot) => slot.slotStatus === "MISSED"
+).length;
+
+const cancelledSlotsCount = data.filter(
+  (slot) => slot.slotStatus === "CANCELLED"
+).length;
+
+// RESPONSE
+return res.status(200).json({
+  success: true,
+
+  filter: filter || "all",
+
+  bookedSlotsCount,
+
+  completedSlotsCount,
+
+  missedSlotsCount,
+
+  cancelledSlotsCount,
+
+  totalSlots: bookedSlotsCount,
+
+  totalEarnings: Number(
+    totalEarnings.toFixed(2)
+  ),
+
+  data,
+});
   } catch (err) {
     console.error("Slot History Error:", err);
 
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Server error",
+      error: err.message,
     });
   }
 };
@@ -777,6 +903,7 @@ exports.getRiderOrderHistory = async (req, res) => {
     const { filter = "all" } = req.query;
     let dateFilter = {};
 
+    // ---------- DATE FILTERS ----------
     if (filter === "daily") {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -788,29 +915,36 @@ exports.getRiderOrderHistory = async (req, res) => {
     }
 
     if (filter === "weekly") {
-      const start = new Date();
-      start.setDate(start.getDate() - 6);
-      start.setHours(0, 0, 0, 0);
+      const now = new Date();
 
-      dateFilter = { gte: start, lte: new Date() };
+      const firstDayOfWeek = new Date(now);
+      const day = now.getDay();
+
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+
+      firstDayOfWeek.setDate(diff);
+      firstDayOfWeek.setHours(0, 0, 0, 0);
+
+      const lastDayOfWeek = new Date(firstDayOfWeek);
+      lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+      lastDayOfWeek.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        gte: firstDayOfWeek,
+        lte: lastDayOfWeek,
+      };
     }
 
     if (filter === "monthly") {
-      const start = new Date(
-        new Date().getFullYear(),
-        new Date().getMonth(),
-        1,
-      );
-      const end = new Date(
-        new Date().getFullYear(),
-        new Date().getMonth() + 1,
-        0,
-        23,
-        59,
-        59,
-      );
+      const now = new Date();
 
-      dateFilter = { gte: start, lte: end };
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      dateFilter = {
+        gte: start,
+        lt: nextMonth,
+      };
     }
 
     // ---------- FETCH ORDERS ----------
@@ -823,101 +957,145 @@ exports.getRiderOrderHistory = async (req, res) => {
       include: {
         OrderItems: true,
         OrderPricing: true,
-        OrderPayment: true,
         OrderTracking: true,
         OrderPickupAddress: true,
         OrderDeliveryAddress: true,
+        OrderRiderEarning: true,
       },
       orderBy: {
         createdAt: "desc",
       },
     });
-    orders.forEach((order) => {
-      if (!order.OrderPricing) {
-        console.warn("Delivered order missing pricing:", order.orderId);
-      }
+
+    // ---------- FETCH RIDER RATINGS ----------
+    // Fetch only by riderId, not by orderId
+    const riderRatings = await prisma.riderRating.findMany({
+      where: {
+        riderId,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
     });
+
+    const ratingMap = new Map(
+      riderRatings.map((rating) => [rating.orderId, rating])
+    );
+
+    // ---------- RIDER EARNING ----------
+    const getRiderEarning = (order) => {
+      const earning = order.OrderRiderEarning;
+      return Number(earning?.totalEarning || 0);
+    };
+
     // ---------- TOTALS ----------
     const totalOrders = orders.length;
 
-    const totalEarnings = orders.reduce(
-      (sum, o) => sum + (o.OrderPricing?.totalAmount || 0),
-      0,
+    const totalRiderEarnings = Number(
+      orders
+        .reduce((sum, order) => sum + getRiderEarning(order), 0)
+        .toFixed(2)
     );
 
     const totalDistance = Number(
       orders
-        .reduce((sum, o) => sum + (o.OrderTracking?.distanceInKm || 0), 0)
-        .toFixed(2),
+        .reduce(
+          (sum, order) =>
+            sum + Number(order.OrderTracking?.distanceInKm || 0),
+          0
+        )
+        .toFixed(2)
     );
 
-    const ratings = orders
-      .map((o) => o.rating)
-      .filter((r) => typeof r === "number");
+    // ---------- AVG RIDER RATING ----------
+    const validRatings = riderRatings
+      .map((r) => Number(r.rating))
+      .filter((rating) => !isNaN(rating) && rating > 0);
 
-    const avgRating = ratings.length
-      ? (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)
-      : null;
+    const avgRating = validRatings.length
+      ? Number(
+          (
+            validRatings.reduce((sum, rating) => sum + rating, 0) /
+            validRatings.length
+          ).toFixed(1)
+        )
+      : 0;
 
-    // ---------- RESPONSE ----------
-    const data = orders.map((order) => ({
-      orderId: order.orderId,
+    // ---------- RESPONSE DATA ----------
+    const data = orders.map((order) => {
+      const pricing = order.OrderPricing;
+      const earning = order.OrderRiderEarning;
+      const riderRating = ratingMap.get(order.orderId);
 
-      items:
-        order.OrderItems?.map((item) => ({
-          itemName: item.itemName,
-          quantity: item.quantity,
-          price: item.price,
-          total: item.total,
-        })) || [],
+      const riderEarning = Number(getRiderEarning(order).toFixed(2));
 
-      pricing: {
-        itemTotal: order.OrderPricing?.itemTotal || 0,
-        deliveryFee: order.OrderPricing?.deliveryFee || 0,
-        tax: order.OrderPricing?.tax || 0,
-        platformCommission: order.OrderPricing?.platformCommission || 0,
-        totalAmount: order.OrderPricing?.totalAmount || 0,
-      },
+      return {
+        orderId: order.orderId,
 
-      customerTip: 0,
+        items:
+          order.OrderItems?.map((item) => ({
+            itemName: item.itemName,
+            quantity: item.quantity,
+            price: item.price,
+            total: item.total,
+          })) || [],
 
-      distanceTravelled: order.OrderTracking?.distanceInKm || 0,
+        pricing: {
+          itemTotal: pricing?.itemTotal || 0,
+          deliveryFee: pricing?.deliveryFee || 0,
+          tax: pricing?.tax || 0,
+          platformCommission: pricing?.platformCommission || 0,
+          totalAmount: pricing?.totalAmount || 0,
 
-      durationInMin: order.OrderTracking?.durationInMin || 0,
-      pickupAddress: order.OrderPickupAddress?.addressLine || "",
+          riderEarning,
 
-      rating: null,
+          earningBreakup: {
+            basePay: earning?.basePay || 0,
+            distancePay: earning?.distancePay || 0,
+            surgePay: earning?.surgePay || 0,
+            tips: earning?.tips || 0,
+            totalEarning: earning?.totalEarning || 0,
+            credited: earning?.credited || false,
+            creditedAt: earning?.creditedAt || null,
+          },
+        },
 
-      deliveredAddress: order.OrderDeliveryAddress?.addressLine || "",
-      deliveredAt: order.updatedAt || null,
-    }));
+        distanceTravelled: order.OrderTracking?.distanceInKm || 0,
+        durationInMin: order.OrderTracking?.durationInMin || 0,
+
+        pickupAddress: order.OrderPickupAddress?.addressLine || "",
+        deliveredAddress: order.OrderDeliveryAddress?.addressLine || "",
+
+        // order-wise rating if orderId matched
+        rating: riderRating ? Number(riderRating.rating) : 0,
+        review: riderRating?.review || null,
+
+        deliveredAt: order.updatedAt || null,
+      };
+    });
 
     return res.status(200).json({
       success: true,
       filter,
       totalOrders,
-      totalEarnings,
+      totalRiderEarnings,
       totalDistance,
+
+      // rider overall average rating
       avgRating,
+
       data,
     });
   } catch (err) {
     console.error("Order History Error:", err);
+
     return res.status(500).json({
       success: false,
       message: "Server error",
+      error: err.message,
     });
   }
 };
-/**
-
-* ============================================================
-
-* UPDATE BANK DETAILS (PUT)
-
-* ============================================================
-
-*/
 exports.addOrUpdateBankDetails = async (req, res) => {
   try {
     const riderId = req.rider.id;

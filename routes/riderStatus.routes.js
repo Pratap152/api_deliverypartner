@@ -37,7 +37,7 @@ const {
  *                   type: string
  *                   example: Rider is now ONLINE
  *
- *                 # ✅ NEW FIELD
+ *                 # NEW FIELD
  *                 isPartnerActive:
  *                   type: boolean
  *                   example: true
@@ -128,13 +128,11 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  * @swagger
  * /api/rider/status/offline:
  *   patch:
- *     tags: [Rider Status]
- *     summary: Set Rider Offline
- *     description: Marks rider as OFFLINE, updates logout timestamp, calculates session minutes, and sets delivery inactive reason.
- *
+ *     summary: Rider go offline
+ *     tags:
+ *       - Rider Status
  *     security:
  *       - bearerAuth: []
- *
  *     requestBody:
  *       required: false
  *       content:
@@ -144,13 +142,16 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  *             properties:
  *               reason:
  *                 type: string
- *                 description: Reason for going offline
- *                 enum: [MANUAL_OFF, KYC_PENDING, ACCOUNT_SUSPENDED, OUT_OF_SERVICE_AREA, COD_LIMIT_EXCEEDED]
+ *                 enum:
+ *                   - MANUAL_OFF
+ *                   - KYC_PENDING
+ *                   - ACCOUNT_SUSPENDED
+ *                   - OUT_OF_SERVICE_AREA
+ *                   - COD_LIMIT_EXCEEDED
  *                 example: MANUAL_OFF
- *
  *     responses:
  *       200:
- *         description: Rider successfully set to OFFLINE
+ *         description: Rider successfully went offline
  *         content:
  *           application/json:
  *             schema:
@@ -162,12 +163,22 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  *                 message:
  *                   type: string
  *                   example: Rider is now OFFLINE
- *
- *                 # ✅ NEW FIELD
- *                 isPartnerActive:
- *                   type: boolean
- *                   example: false
- *
+ *                 reminder:
+ *                   type: string
+ *                   nullable: true
+ *                   example: Previous day session expired. Today's online timing calculated from 12:00 AM only.
+ *                 rider:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: 6ceef092-d8cd-4c70-8720-5af0aa51678b
+ *                     isOnline:
+ *                       type: boolean
+ *                       example: false
+ *                     isPartnerActive:
+ *                       type: boolean
+ *                       example: false
  *                 riderStatus:
  *                   type: object
  *                   properties:
@@ -177,14 +188,18 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  *                     lastLoginAt:
  *                       type: string
  *                       format: date-time
- *                       example: "2026-02-02T08:30:00.000Z"
+ *                       example: 2026-05-12T04:42:10.575Z
  *                     lastLogoutAt:
  *                       type: string
  *                       format: date-time
- *                       example: "2026-02-02T12:45:00.000Z"
+ *                       example: 2026-05-12T10:24:18.670Z
  *                     totalOnlineMinutesToday:
- *                       type: number
- *                       example: 135
+ *                       type: integer
+ *                       example: 342
+ *                     onlineMinutesDate:
+ *                       type: string
+ *                       format: date-time
+ *                       example: 2026-05-12T00:00:00.000Z
  *                 deliveryStatus:
  *                   type: object
  *                   properties:
@@ -194,9 +209,8 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  *                     inactiveReason:
  *                       type: string
  *                       example: MANUAL_OFF
- *
  *       400:
- *         description: Invalid reason or rider already offline
+ *         description: Invalid request
  *         content:
  *           application/json:
  *             schema:
@@ -208,7 +222,19 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  *                 message:
  *                   type: string
  *                   example: Rider already offline
- *
+ *       401:
+ *         description: Unauthorized rider
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Unauthorized rider
  *       404:
  *         description: Rider not found
  *         content:
@@ -222,9 +248,8 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  *                 message:
  *                   type: string
  *                   example: Rider not found
- *
  *       500:
- *         description: Server error
+ *         description: Internal server error
  *         content:
  *           application/json:
  *             schema:
@@ -235,9 +260,8 @@ router.patch("/online", riderAuthMiddleWare, goOnline);
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: Server Error
+ *                   example: Server error
  */
-
 router.patch("/offline", riderAuthMiddleWare, goOffline);
 
 module.exports = router;

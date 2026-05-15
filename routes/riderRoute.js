@@ -12,7 +12,7 @@ const {
   uploadPan,
   uploadDL,
   getProfile,
-  savePermissions,
+  saveAppPermissions,
   logoutOrDelete,
   onboardingStatus,
   completeKyc,
@@ -20,11 +20,11 @@ const {
   deviceToken,
   initializeApp,
   toggleRiderStatus,
-  updateGPS
+  updateGPS,
+  updateCompanyEmployeeLocation
 } = require("../controllers/riderRegisterController");
 
 const { riderAuthMiddleWare } = require("../middleware/riderAuthMiddleware");
-const {getWeeklyIncentiveForRider} = require("../controllers/riderIncentiveController");
 const {upload} = require("../utils/azureUpload");
 // const uploadDriving=require('../utils/multerDL')
 
@@ -147,12 +147,12 @@ riderRouter.get("/auth/status", checkStatus);
  * @swagger
  * /api/rider/personal-info:
  *   post:
- *     tags: [Rider]
  *     summary: Save rider personal information
- *     description: Save personal information of the rider. fullName and primaryPhone are required.
+ *     description: Saves rider personal info and optional referral code.
+ *     tags:
+ *       - Rider
  *     security:
  *       - bearerAuth: []
- *
  *     requestBody:
  *       required: true
  *       content:
@@ -165,11 +165,11 @@ riderRouter.get("/auth/status", checkStatus);
  *             properties:
  *               fullName:
  *                 type: string
- *                 example: "Ramu Kumar"
+ *                 example: Ravi Kumar
  *               dob:
  *                 type: string
  *                 format: date
- *                 example: "1995-05-21"
+ *                 example: 1998-05-10
  *               gender:
  *                 type: string
  *                 enum: [male, female, other]
@@ -183,44 +183,65 @@ riderRouter.get("/auth/status", checkStatus);
  *               email:
  *                 type: string
  *                 format: email
- *                 example: "ramu@example.com"
- *
+ *                 example: ravi@gmail.com
+ *               referralCode:
+ *                 type: string
+ *                 description: Partner ID/referral code of existing active rider
+ *                 example: "PARTNER12345"
  *     responses:
  *       200:
  *         description: Personal info saved successfully
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Personal info saved successfully"
- *                 data:
- *                   type: object
- *                   properties:
- *                     riderId:
- *                       type: string
- *                     personalInfo:
- *                       type: object
- *                     onboardingProgress:
- *                       type: object
- *                     onboardingStage:
- *                       type: string
- *
+ *             example:
+ *               success: true
+ *               message: Personal info saved successfully
+ *               data:
+ *                 riderId: "rider-id"
+ *                 personalInfo:
+ *                   fullName: Ravi Kumar
+ *                   dob: "1998-05-10T00:00:00.000Z"
+ *                   gender: male
+ *                   primaryPhone: "9876543210"
+ *                   secondaryPhone: "9123456780"
+ *                   email: ravi@gmail.com
+ *                 onboardingStage: SELFIE
  *       400:
- *         description: Validation error
+ *         description: Validation or referral error
+ *         content:
+ *           application/json:
+ *             examples:
+ *               requiredFields:
+ *                 value:
+ *                   success: false
+ *                   message: fullName and primaryPhone are required
+ *               invalidReferral:
+ *                 value:
+ *                   success: false
+ *                   message: Invalid referral code
+ *               ownReferral:
+ *                 value:
+ *                   success: false
+ *                   message: You cannot use your own referral code
+ *               inactiveReferral:
+ *                 value:
+ *                   success: false
+ *                   message: Referral code is not active
  *       401:
- *         description: Unauthorized
- *       404:
- *         description: Rider not found
+ *         description: Unauthorized rider
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: false
+ *               message: Unauthorized rider
  *       500:
  *         description: Server error
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: false
+ *               message: Error saving personal info
  */
-
 riderRouter.post("/rider/personal-info", riderAuthMiddleWare, savePersonalInfo);
 
 // ============================================================
@@ -232,8 +253,8 @@ riderRouter.post("/rider/personal-info", riderAuthMiddleWare, savePersonalInfo);
  * /api/rider/location:
  *   post:
  *     tags: [Rider]
- *     summary: Update rider location (city & area)
- *     description: Saves selected city and area for the rider and moves onboarding to SELECT_VEHICLE stage.
+ *     summary: Update rider location (city & pincode)
+ *     description: Saves selected city and pincode for the rider and moves onboarding to SELECT_VEHICLE stage.
  *     security:
  *       - bearerAuth: []
  *
@@ -245,14 +266,14 @@ riderRouter.post("/rider/personal-info", riderAuthMiddleWare, savePersonalInfo);
  *             type: object
  *             required:
  *               - city
- *               - area
+ *               - pincode
  *             properties:
  *               city:
  *                 type: string
  *                 example: "Hyderabad"
- *               area:
+ *               pincode:
  *                 type: string
- *                 example: "Madhapur"
+ *                 example: "500081"
  *
  *     responses:
  *       200:
@@ -274,24 +295,174 @@ riderRouter.post("/rider/personal-info", riderAuthMiddleWare, savePersonalInfo);
  *                     city:
  *                       type: string
  *                       example: Hyderabad
- *                     area:
+ *                     pincode:
  *                       type: string
- *                       example: Madhapur
+ *                       example: "500081"
  *                 nextStage:
  *                   type: string
  *                   example: SELECT_VEHICLE
  *
  *       400:
- *         description: Missing city or area
+ *         description: Missing city or pincode
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: false
+ *               message: City and pincode are required
  *
  *       404:
- *         description: Invalid city or area
+ *         description: Invalid pincode
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: false
+ *               message: Invalid pincode
  *
  *       500:
  *         description: Server error
  */
 
 riderRouter.post("/rider/location", riderAuthMiddleWare, updateLocation);
+
+/**
+ * @swagger
+ * /api/admin/company-rider/location:
+ *   post:
+ *     tags:
+ *       - Company Employee Location
+ *     summary: Update company employee rider location
+ *     description: >
+ *       Updates the city and pincode location for a company employee rider.
+ *       
+ *       Features:
+ *       - Validates rider existence
+ *       - Allows only COMPANY_EMPLOYEE riders
+ *       - Validates city and pincode mapping
+ *       - Creates or updates rider location
+ *       - Marks onboarding citySelected as true
+ *
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - riderId
+ *               - city
+ *               - pincode
+ *             properties:
+ *
+ *               riderId:
+ *                 type: string
+ *                 example: RIDER12345
+ *
+ *               city:
+ *                 type: string
+ *                 example: Hyderabad
+ *
+ *               pincode:
+ *                 type: string
+ *                 example: "500081"
+ *
+ *     responses:
+ *
+ *       200:
+ *         description: Company employee location updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *
+ *                 message:
+ *                   type: string
+ *                   example: Company employee location updated successfully
+ *
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *
+ *                     riderId:
+ *                       type: string
+ *                       example: RIDER12345
+ *
+ *                     city:
+ *                       type: string
+ *                       example: Hyderabad
+ *
+ *                     pincode:
+ *                       type: string
+ *                       example: "500081"
+ *
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *
+ *                 message:
+ *                   type: string
+ *                   examples:
+ *                     missingRiderId:
+ *                       value: riderId is required
+ *
+ *                     missingCityPincode:
+ *                       value: city and pincode are required
+ *
+ *                     invalidRiderType:
+ *                       value: Location can only be updated for company employee riders
+ *
+ *       404:
+ *         description: Rider or pincode not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *
+ *                 message:
+ *                   type: string
+ *                   examples:
+ *                     riderNotFound:
+ *                       value: Rider not found
+ *
+ *                     invalidLocation:
+ *                       value: Invalid city or pincode
+ *
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *
+ *                 message:
+ *                   type: string
+ *                   example: Internal server error
+ */
+
+
+riderRouter.post("/admin/company-rider/location", updateCompanyEmployeeLocation );
 
 // ============================================================
 //   VEHICLE
@@ -594,11 +765,10 @@ riderRouter.post(
 );
 /**
  * @swagger
- * /api/rider/permissions:
+ * /api/rider/app-permissions:
  *   post:
- *     tags: [Rider]
- *     summary: Save app permissions (camera, foreground, background)
- *     description: Moved to next stage after permissions are granted. Requires Bearer token.
+ *     summary: Save Rider App Permissions
+ *     tags: [Rider Onboarding]
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -607,6 +777,10 @@ riderRouter.post(
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - camera
+ *               - foregroundLocation
+ *               - backgroundLocation
  *             properties:
  *               camera:
  *                 type: boolean
@@ -616,22 +790,28 @@ riderRouter.post(
  *                 example: true
  *               backgroundLocation:
  *                 type: boolean
- *                 example: false
+ *                 example: true
  *     responses:
  *       200:
- *         description: Permissions saved successfully
+ *         description: Permissions granted successfully
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: Permissions saved successfully
+ *               allPermissionsGranted: true
+ *               nextStage: EMPLOYEE_TYPE
  *       400:
- *         description: Invalid or missing boolean values
+ *         description: Invalid input or onboarding restriction
  *       401:
- *         description: Unauthorized
+ *         description: Unauthorized (missing/invalid token)
  *       500:
- *         description: Server error
+ *         description: Internal server error
  */
-
 riderRouter.post(
-  "/rider/permissions",
+  "/rider/app-permissions",
   riderAuthMiddleWare,
-  savePermissions
+  saveAppPermissions
 );
 
 
@@ -760,6 +940,117 @@ riderRouter.delete("/rider/logout", riderAuthMiddleWare,logoutOrDelete)
  *       500:
  *         description: Server error while fetching onboarding status
  */
+
+
+
+// /**
+//  * @swagger
+//  * /api/rider/onboarding-status:
+//  *   get:
+//  *     summary: Get Rider Onboarding Status
+//  *     description: Returns onboarding stage and progress based on rider type (INDIVIDUAL or COMPANY)
+//  *     tags:
+//  *       - Rider Onboarding
+//  *     security:
+//  *       - bearerAuth: []
+//  *
+//  *     responses:
+//  *       200:
+//  *         description: Onboarding status fetched successfully
+//  *         content:
+//  *           application/json:
+//  *             schema:
+//  *               type: object
+//  *               properties:
+//  *                 success:
+//  *                   type: boolean
+//  *                   example: true
+//  *                 message:
+//  *                   type: string
+//  *                   example: Onboarding status fetched successfully
+//  *                 onboardingStage:
+//  *                   type: string
+//  *                   example: EMPLOYEE_DETAILS
+//  *                 onboardingProgress:
+//  *                   type: object
+//  *                   description: Dynamic response based on riderType
+//  *                   oneOf:
+//  *                     - type: object
+//  *                       description: Individual Rider Flow
+//  *                       properties:
+//  *                         riderId:
+//  *                           type: string
+//  *                         phoneVerified:
+//  *                           type: boolean
+//  *                         appPermissionDone:
+//  *                           type: boolean
+//  *                         citySelected:
+//  *                           type: boolean
+//  *                         vehicleSelected:
+//  *                           type: boolean
+//  *                         personalInfoSubmitted:
+//  *                           type: boolean
+//  *                         selfieUploaded:
+//  *                           type: boolean
+//  *                         aadharVerified:
+//  *                           type: boolean
+//  *                         panUploaded:
+//  *                           type: boolean
+//  *                         dlUploaded:
+//  *                           type: boolean
+//  *                         kycCompleted:
+//  *                           type: boolean
+//  *                         riderType:
+//  *                           type: boolean
+//  *
+//  *                     - type: object
+//  *                       description: Company Employee Flow
+//  *                       properties:
+//  *                         riderId:
+//  *                           type: string
+//  *                         phoneVerified:
+//  *                           type: boolean
+//  *                         appPermissionDone:
+//  *                           type: boolean
+//  *                         employeeDetailsSubmitted:
+//  *                           type: boolean
+//  *                         documentDetailsSubmitted:
+//  *                           type: boolean
+//  *                         employeeKycVerified:
+//  *                           type: boolean
+//  *                         kycCompleted:
+//  *                           type: boolean
+//  *                         riderType:
+//  *                           type: boolean
+//  *
+//  *                 isFullyRegistered:
+//  *                   type: boolean
+//  *                   example: false
+//  *
+//  *       401:
+//  *         description: Unauthorized
+//  *         content:
+//  *           application/json:
+//  *             example:
+//  *               success: false
+//  *               message: Unauthorized: Rider token invalid
+//  *
+//  *       404:
+//  *         description: Rider not found
+//  *         content:
+//  *           application/json:
+//  *             example:
+//  *               success: false
+//  *               message: Rider not found
+//  *
+//  *       500:
+//  *         description: Internal server error
+//  *         content:
+//  *           application/json:
+//  *             example:
+//  *               success: false
+//  *               message: Server error while fetching onboarding status
+//  */
 
 riderRouter.get("/rider/onboarding-status", riderAuthMiddleWare,onboardingStatus)
 
@@ -1124,81 +1415,5 @@ riderRouter.patch(
   riderAuthMiddleWare,
    updateGPS
 );
-
-/**
- * @swagger
- * /api/incentives/get_weekly:
- *   get:
- *     summary: Get weekly incentive details for rider
- *     description: Returns active weekly incentive configuration along with rider progress for the current week.
- *     tags:
- *       - Rider Incentives
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Weekly incentive fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   nullable: true
- *                   properties:
- *                     incentiveId:
- *                       type: string
- *                       example: 6970ad9c46aa02fad3554ca7
- *                     title:
- *                       type: string
- *                       example: WEEKLY_TARGET
- *                     description:
- *                       type: string
- *                       example: Complete daily targets to earn weekly bonus
- *                     weeklyRules:
- *                       type: object
- *                       properties:
- *                         totalDaysInWeek:
- *                           type: number
- *                           example: 7
- *                         minOrdersPerDay:
- *                           type: number
- *                           example: 10
- *                         allowPartialDays:
- *                           type: boolean
- *                           example: true
- *                     maxRewardPerWeek:
- *                       type: number
- *                       example: 500
- *                     progress:
- *                       type: object
- *                       properties:
- *                         eligibleDays:
- *                           type: number
- *                           example: 3
- *                         totalDaysRequired:
- *                           type: number
- *                           example: 7
- *                         totalOrders:
- *                           type: number
- *                           example: 34
- *                         isEligible:
- *                           type: boolean
- *                           example: true
- *       401:
- *         description: Unauthorized – invalid or missing token
- *       500:
- *         description: Internal server error
- */
-
-riderRouter.get("/incentives/get_weekly", riderAuthMiddleWare, getWeeklyIncentiveForRider);
-
-
-
-
 
 module.exports = riderRouter;

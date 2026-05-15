@@ -8,43 +8,31 @@ const { riderAuthMiddleWare } = require("../middleware/riderAuthMiddleware");
  * @swagger
  * /api/slots/week:
  *   get:
- *     summary: Get weekly slots with date and day name
- *     description: Fetch slot list for a given week, city, and zone. Shows each day with its date, day name, and active slots.
- *     tags:
- *       - Slots
+ *     tags: [Slots]
+ *     summary: Get weekly slots based on rider location
+ *     description: >
+ *       Fetch slots for a given week.
+ *       Slots are automatically filtered using the rider's saved city and pincode.
+ *       If weekNumber or year is not provided, current week is used.
+ *     security:
+ *       - bearerAuth: []
  *
  *     parameters:
- *       - in: query
- *         name: city
- *         required: true
- *         schema:
- *           type: string
- *         description: City name
- *         example: Hyderabad
- *
- *       - in: query
- *         name: zone
- *         required: true
- *         schema:
- *           type: string
- *         description: Zone name
- *         example: Gachibowli
- *
  *       - in: query
  *         name: weekNumber
  *         required: false
  *         schema:
  *           type: number
- *         description: Week number (1–52). Defaults to current week.
- *         example: 49
+ *         example: 18
+ *         description: Week number (1–52). Defaults to current week
  *
  *       - in: query
  *         name: year
  *         required: false
  *         schema:
  *           type: number
- *         description: Year. Defaults to current year.
- *         example: 2025
+ *         example: 2026
+ *         description: Year. Defaults to current year
  *
  *     responses:
  *       200:
@@ -54,52 +42,80 @@ const { riderAuthMiddleWare } = require("../middleware/riderAuthMiddleware");
  *             example:
  *               success: true
  *               message: "Weekly slots fetched"
- *               weekNumber: 49
- *               year: 2025
+ *               weekNumber: 18
+ *               year: 2026
  *               count: 7
  *               data:
- *                 - date: "2025-12-01"
+ *                 - date: "2026-04-27"
  *                   dayName: "Mon"
- *                   weekNumber: 49
- *                   year: 2025
- *                   city: "Hyderabad"
- *                   zone: "Gachibowli"
+ *                   weekNumber: 18
+ *                   year: 2026
+ *                   cityId: "city-uuid"
+ *                   pincodeId: "pincode-uuid"
  *                   slots:
- *                     - slotId: "677fc1000000000000000011"
+ *                     - slotId: "db7e5fb1-a8fd-43da-bb5f-34d517cf32fc"
  *                       startTime: "06:00"
  *                       endTime: "08:00"
- *                       durationInHours: 2
  *                       maxRiders: 40
- *                       bookedRiders: 1
+ *                       bookedRiders: 5
  *                       status: "ACTIVE"
  *
  *       400:
- *         description: Missing required parameters
- *         content:
- *           application/json:
- *             example: 
- *               success: false
- *               message: "City is required"
- *
- *       500:
- *         description: Server error
+ *         description: Missing or invalid data
  *         content:
  *           application/json:
  *             example:
  *               success: false
- *               message: "Server error"
+ *               message: "Rider location not set"
+ *
+ *       404:
+ *         description: Invalid city or pincode
+ *         content:
+ *           application/json:
+ *             examples:
+ *               cityNotFound:
+ *                 value:
+ *                   success: false
+ *                   message: "City not found"
+ *
+ *               pincodeNotFound:
+ *                 value:
+ *                   success: false
+ *                   message: "Pincode not found"
+ *
+ *       201:
+ *         description: No slots available
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "No slots found for this week"
+ *               weekNumber: 18
+ *               year: 2026
+ *               count: 0
+ *               data: []
+ *
+ *       401:
+ *         description: Unauthorized
+ *
+ *       500:
+ *         description: Server error
  */
 
-
-slotRouter.get("/week", getWeeklySlots);
+slotRouter.get("/week",riderAuthMiddleWare ,getWeeklySlots);
 
 /**
  * @swagger
  * /api/slots/day:
  *   get:
  *     tags: [Slots]
- *     summary: Get daily slots for a specific date
- *     description: Fetch all active slots available on a specific day.
+ *     summary: Get daily slots based on rider location
+ *     description: >
+ *       Fetch all active slots for a specific date.
+ *       Slots are automatically filtered using the rider's saved city and pincode.
+ *     security:
+ *       - bearerAuth: []
+ *
  *     parameters:
  *       - in: query
  *         name: date
@@ -107,80 +123,89 @@ slotRouter.get("/week", getWeeklySlots);
  *         schema:
  *           type: string
  *           format: date
- *         example: 2025-12-01
+ *         example: 2026-04-27
  *         description: Date for which slots are fetched (YYYY-MM-DD)
- *
- *       - in: query
- *         name: city
- *         required: true
- *         schema:
- *           type: string
- *         example: Hyderabad
- *
- *       - in: query
- *         name: zone
- *         required: true
- *         schema:
- *           type: string
- *         example: Gachibowli
  *
  *     responses:
  *       200:
  *         description: Daily slots fetched successfully
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Daily slots fetched
- *                 date:
- *                   type: string
- *                   example: "2025-12-01"
- *                 weekNumber:
- *                   type: number
- *                   example: 49
- *                 year:
- *                   type: number
- *                   example: 2025
- *                 count:
- *                   type: number
- *                   example: 3
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       startTime:
- *                         type: string
- *                         example: "08:00"
- *                       endTime:
- *                         type: string
- *                         example: "10:00"
- *                       isPeakSlot:
- *                         type: boolean
- *                         example: false
+ *             example:
+ *               success: true
+ *               message: "Daily slots fetched"
+ *               date: "2026-04-27"
+ *               weekNumber: 18
+ *               year: 2026
+ *               count: 2
+ *               data:
+ *                 - slotId: "db7e5fb1-a8fd-43da-bb5f-34d517cf32fc"
+ *                   startTime: "06:00"
+ *                   endTime: "08:00"
+ *                   maxRiders: 40
+ *                   bookedRiders: 5
+ *                   isPeakSlot: false
  *
  *       400:
- *         description: Missing required query params
+ *         description: Missing required data
+ *         content:
+ *           application/json:
+ *             examples:
+ *               missingDate:
+ *                 value:
+ *                   success: false
+ *                   message: "Date is required (YYYY-MM-DD)"
+ *
+ *               locationMissing:
+ *                 value:
+ *                   success: false
+ *                   message: "Rider location not set"
+ *
+ *       404:
+ *         description: Invalid city or pincode
+ *         content:
+ *           application/json:
+ *             examples:
+ *               cityNotFound:
+ *                 value:
+ *                   success: false
+ *                   message: "City not found"
+ *
+ *               pincodeNotFound:
+ *                 value:
+ *                   success: false
+ *                   message: "Pincode not found"
+ *
+ *       201:
+ *         description: No slots available
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "No slots found for this date"
+ *               date: "2026-04-27"
+ *               count: 0
+ *               data: []
+ *
+ *       401:
+ *         description: Unauthorized
  *
  *       500:
  *         description: Server error
  */
 
-
-slotRouter.get("/day", getDailySlots);
+slotRouter.get("/day",riderAuthMiddleWare, getDailySlots);
 
 /**
  * @swagger
  * /api/slots/book:
  *   post:
- *     summary: Book multiple slots at once for a rider
+ *     summary: Book slots based on rider location (city + pincode)
  *     tags: [Slots]
+ *     description: >
+ *       Books one or more slots for the rider.
+ *       Slots are automatically filtered using rider's saved city and pincode.
+ *       Rider must complete onboarding before booking.
  *     security:
  *       - bearerAuth: []
  *
@@ -196,73 +221,89 @@ slotRouter.get("/day", getDailySlots);
  *             properties:
  *               date:
  *                 type: string
- *                 example: "2025-12-01"
- *                 description: Date of the slots (YYYY-MM-DD)
+ *                 format: date
+ *                 example: "2026-04-27"
+ *                 description: Slot date (YYYY-MM-DD)
+ *
  *               slotIds:
  *                 type: array
- *                 description: List of slot IDs to book
  *                 items:
  *                   type: string
- *                 example: ["677fc1000000000000000011", "677fc1000000000000000012"]
+ *                 example:
+ *                   - "db7e5fb1-a8fd-43da-bb5f-34d517cf32fc"
+ *                   - "aaaf206d-5585-40bb-96ea-88a058955999"
  *
  *     responses:
  *       200:
  *         description: Slots booked successfully
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Slots booked successfully"
- *                 bookedCount:
- *                   type: number
- *                   example: 2
- *                 failedCount:
- *                   type: number
- *                   example: 1
- *                 booked:
- *                   type: array
- *                   description: List of successfully booked slots
- *                   items:
- *                     type: object
- *                 failed:
- *                   type: array
- *                   description: Slots that failed booking
- *                   items:
- *                     type: object
- *                     properties:
- *                       slotId:
- *                         type: string
- *                         example: "677fc1000000000000000015"
- *                       reason:
- *                         type: string
- *                         example: "Slot is full"
+ *             example:
+ *               success: true
+ *               message: "Slots booked successfully"
+ *               bookedCount: 1
+ *               failedCount: 1
+ *               booked:
+ *                 - slotId: "db7e5fb1-a8fd-43da-bb5f-34d517cf32fc"
+ *                   date: "2026-04-27"
+ *                   startTime: "06:00"
+ *                   endTime: "08:00"
+ *               failed:
+ *                 - slotId: "aaaf206d-5585-40bb-96ea-88a058955999"
+ *                   reason: "Slot is full"
  *
  *       400:
- *         description: Invalid request / Some slots failed
+ *         description: Invalid request or missing data
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               example:
- *                 success: false
- *                 message: "No valid slots to book"
- *                 failed:
- *                   - slotId: "677fc1000000000000000017"
- *                     reason: "Already booked"
+ *             examples:
+ *               missingData:
+ *                 value:
+ *                   success: false
+ *                   message: "date and slotIds[] are required"
+ *
+ *               noValidSlots:
+ *                 value:
+ *                   success: false
+ *                   message: "No valid slots to book"
+ *                   failed:
+ *                     - slotId: "abc"
+ *                       reason: "Already booked"
+ *
+ *               locationMissing:
+ *                 value:
+ *                   success: false
+ *                   message: "Rider location not set"
+ *
+ *       403:
+ *         description: Rider not fully onboarded
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: false
+ *               message: "Complete onboarding before booking slots"
+ *
+ *       404:
+ *         description: Rider or slots not found
+ *         content:
+ *           application/json:
+ *             examples:
+ *               riderNotFound:
+ *                 value:
+ *                   success: false
+ *                   message: "Rider not found"
+ *
+ *               noSlots:
+ *                 value:
+ *                   success: false
+ *                   message: "No slots found for this date"
  *
  *       401:
- *         description: Unauthorized (Missing or invalid token)
+ *         description: Unauthorized
  *
  *       500:
  *         description: Server error
  */
-
 
 slotRouter.post("/book", riderAuthMiddleWare, bookSlot);
 
@@ -456,7 +497,7 @@ slotRouter.get("/current", riderAuthMiddleWare, getCurrentSlot);
  *           example: "2025-12-01"
  *
  *       - in: query
- *         name: city
+ *         name: cityId
  *         required: true
  *         description: City name
  *         schema:
@@ -464,9 +505,9 @@ slotRouter.get("/current", riderAuthMiddleWare, getCurrentSlot);
  *           example: "Hyderabad"
  *
  *       - in: query
- *         name: zone
+ *         name: pincodeId
  *         required: true
- *         description: Zone name
+ *         description: Pincode Id
  *         schema:
  *           type: string
  *           example: "Gachibowli"

@@ -1,8 +1,6 @@
-const RiderDailyEarnings = require("../models/RiderDailyEarnings");
+const prisma = require('../config/prisma');
 
-const prisma=require('../config/prisma');
-
-const { getISOWeekRange , getCurrentISOWeek} = require("../helpers/getWeekNumber");
+const { getISOWeekRange, getCurrentISOWeek } = require("../helpers/getWeekNumber");
 
 exports.new_getEarningsSummary = async (req, res) => {
   try {
@@ -23,7 +21,7 @@ exports.new_getEarningsSummary = async (req, res) => {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const orders = await prisma.order.findMany({
-      where:{
+      where: {
         riderId: riderId,
         orderStatus: "DELIVERED",
         updatedAt: {
@@ -31,24 +29,24 @@ exports.new_getEarningsSummary = async (req, res) => {
           lte: todayEnd
         }
       },
-    include: {
-      OrderRiderEarning: true
-    }
-  });
+      include: {
+        OrderRiderEarning: true
+      }
+    });
 
     let todayOrders = 0;
     let todayTotal = 0;
     let todayBase = 0;
     let todayIncentives = 0;
     let todayTips = 0;
-    
+
     let weekOrders = 0;
     let weekBase = 0;
     let weekIncentives = 0;
     let weekTips = 0;
     let weekTotal = 0;
 
-    let monthOrders = 0;          
+    let monthOrders = 0;
     let monthBase = 0;
     let monthIncentives = 0;
     let monthTips = 0;
@@ -62,7 +60,7 @@ exports.new_getEarningsSummary = async (req, res) => {
       const basePay = earning.basePay || 0;
       const incentive = earning.surgePay || 0;
       const tips = earning.tips || 0;
-      
+
       //Today
       if (deliveredAt >= todayStart && deliveredAt <= todayEnd) {
         todayOrders += 1;
@@ -82,7 +80,7 @@ exports.new_getEarningsSummary = async (req, res) => {
       }
 
       //MONTH 
-      monthOrders += 1;           
+      monthOrders += 1;
       monthBase += basePay;
       monthIncentives += incentive;
       monthTips += tips;
@@ -105,7 +103,7 @@ exports.new_getEarningsSummary = async (req, res) => {
         total: weekTotal
       },
       month: {
-        orders: monthOrders,      
+        orders: monthOrders,
         baseEarnings: monthBase,
         incentives: monthIncentives,
         tips: monthTips,
@@ -121,16 +119,27 @@ exports.new_getEarningsSummary = async (req, res) => {
 
 
 
-// 2 Bar chart (Mon–Sun)
+// Bar chart (Mon–Sun)
 exports.new_getWeeklyChart = async (req, res) => {
   try {
     const riderId = req.rider.id; //Prisma id
 
-    // ---- CURRENT ISO WEEK ----
+    const rider = await prisma.rider.findUnique({
+      where: {
+        id: riderId
+      },
+      select: {
+        riderType: true
+      }
+    });
+
+    const riderType = rider?.riderType;
+
+    
     const current = getCurrentISOWeek();
     const { start, end } = getISOWeekRange(current.week, current.year);
 
-    // ---- FETCH DELIVERED ORDERS ----
+   
     const orders = await prisma.order.findMany({
       where: {
         riderId,
@@ -141,7 +150,7 @@ exports.new_getWeeklyChart = async (req, res) => {
         }
       },
       include: {
-        OrderRiderEarning: true 
+        OrderRiderEarning: true
       }
     });
 
@@ -179,7 +188,22 @@ exports.new_getWeeklyChart = async (req, res) => {
       });
     }
 
-    res.json({ week });
+    if (riderType === "COMPANY_EMPLOYEE") {
+      return res.json({
+        riderType,
+        week: week.map(day => ({
+          day: day.day,
+          orders: day.orders
+        }))
+      });
+    }
+
+   res.json({
+    riderType,
+    week
+    });
+
+    // res.json({ week });
 
   } catch (err) {
     console.error("Weekly chart error:", err);
@@ -191,13 +215,10 @@ exports.new_getDailyEarnings = async (req, res) => {
   try {
     console.log("Hitted new daily earnings controller");
 
-    const riderId = req.rider.id; // Prisma uses id (not _id)
+    const riderId = req.rider.id; 
 
     let year, month, day;
 
-    // -----------------------------
-    // SAFE DATE PARSING (LOCAL)
-    // -----------------------------
     if (req.query.date) {
       const parts = req.query.date.split("-").map(Number);
 
@@ -223,9 +244,6 @@ exports.new_getDailyEarnings = async (req, res) => {
     const endOfDay = new Date(baseDate);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // -----------------------------
-    // FETCH ORDERS (DELIVERED ONLY)
-    // -----------------------------
     const orders = await prisma.order.findMany({
       where: {
         riderId: riderId,
@@ -243,16 +261,29 @@ exports.new_getDailyEarnings = async (req, res) => {
       }
     });
 
+    console.log("orders : " ,orders.length)
+
     let totalEarnings = 0;
+    let baseEarnings = 0;
+    let incentives = 0;
     const items = [];
 
     orders.forEach(order => {
       const earning = order.OrderRiderEarning;
 
       const amount = earning?.totalEarning || 0;
-      const surgePay = earning?.surgePay || 0;
+
+      const baseAmount =
+        earning?.basePay || 0;
+
+      const incentiveAmount =
+        earning?.surgePay || 0;
 
       totalEarnings += amount;
+
+      baseEarnings += baseAmount;
+
+      incentives += incentiveAmount;
 
       // DELIVERY ENTRY
       items.push({
@@ -263,14 +294,14 @@ exports.new_getDailyEarnings = async (req, res) => {
       });
 
       // BONUS ENTRY
-      if (surgePay > 0) {
-        items.push({
-          type: "BONUS",
-          title: "Peak Hour Bonus",
-          amount: surgePay,
-          time: order.updatedAt
-        });
-      }
+      // if (surgePay > 0) {
+      //   items.push({
+      //     type: "BONUS",
+      //     title: "Peak Hour Bonus",
+      //     amount: surgePay,
+      //     time: order.updatedAt
+      //   });
+      // }
     });
 
     const responseDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -278,32 +309,34 @@ exports.new_getDailyEarnings = async (req, res) => {
     res.json({
       date: responseDate,
       totalEarnings,
+      baseEarnings,
+      incentives,
       items,
-      count:items.length
+      count: items.length
     });
 
   } catch (err) {
-  console.error("Delivery earnings error:", err);
-  return res.status(500).json({
-    message: "Internal server error",
-    error: err.message   
-  });
-}
+    console.error("Delivery earnings error:", err);
+    return res.status(500).json({
+      message: "Internal server error",
+      error: err.message
+    });
+  }
 };
 
 exports.new_getDeliveryEarnings = async (req, res) => {
   try {
     const riderId = req.rider.id;
     const { orderId } = req.params;
-const order = await prisma.order.findFirst({
-  where: {
-    riderId: riderId,
-    orderId: orderId
-  },
-  include: {
-    OrderRiderEarning: true
-  }
-});     
+    const order = await prisma.order.findFirst({
+      where: {
+        riderId: riderId,
+        orderId: orderId
+      },
+      include: {
+        OrderRiderEarning: true
+      }
+    });
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
@@ -343,6 +376,7 @@ function toISTDate(date) {
 exports.new_getWeeklyEarnings = async (req, res) => {
   try {
     const riderId = req.rider.id || req.rider._id;
+  
     let { week, year } = req.query;
 
     if (!week || !year) {
@@ -417,6 +451,27 @@ exports.new_getWeeklyEarnings = async (req, res) => {
       });
     }
 
+    // if (riderType === "COMPANY_EMPLOYEE") {
+    //   return res.json({
+    //     riderType,
+    //     week: Number(week),
+    //     year: Number(year),
+    //     weekRange: `${toISTDate(start).toDateString()} - ${toISTDate(end).toDateString()}`,
+
+    //     totalOrders: days.reduce((sum, d) => sum + d.orders, 0),
+
+    //     days: days.map(day => ({
+    //       day: day.day,
+    //       date: day.date,
+    //       orders: day.orders,
+    //       deliveries: day.deliveries.map(d => ({
+    //         orderId: d.orderId,
+    //         time: d.time
+    //       }))
+    //     }))
+    //   });
+    // }
+
     const total = days.reduce((sum, d) => sum + d.amount, 0);
 
     const lastWeekStart = new Date(start);
@@ -447,6 +502,7 @@ exports.new_getWeeklyEarnings = async (req, res) => {
       lastWeekTotal > 0
         ? Math.round(((total - lastWeekTotal) / lastWeekTotal) * 100)
         : 0;
+
 
     res.json({
       week: Number(week),
