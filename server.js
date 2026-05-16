@@ -1,13 +1,15 @@
 const dotenv = require("dotenv");
 dotenv.config();
 const cron = require("node-cron");
+// const swaggerSetup = require("./config/swagger");
+
 
 const http = require("http");
 
 const app = require("./app");
 const { initWebSocket } = require("./webSocket");
 const {initWebSocketForCall}=require('./webcall')
-
+// swaggerSetup(app);
 //connectDB();
 
 // ONE HTTP SERVER

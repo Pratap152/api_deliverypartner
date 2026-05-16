@@ -8,63 +8,63 @@ datasource db {
 }
 
 model Rider {
-  id                       String                   @id @default(uuid())
-  countryCode              String                   @default("+91")
-  phoneNumber              String                   @unique
-  phoneIsVerified          Boolean                  @default(false)
-  otpCode                  String?
-  otpExpiresAt             DateTime?
-  lastOtpVerifiedAt        DateTime?
-  refreshToken             String?
-  deviceToken              String?
-  fcmToken                 String?
-  onboardingStage          OnboardingStage          @default(PHONE_VERIFICATION)
-  isFullyRegistered        Boolean                  @default(false)
-  isOnline                 Boolean                  @default(false)
-  orderState               OrderState               @default(READY)
-  currentOrderId           String?
-  partnerId                String?                  @unique
-  isPartnerActive          Boolean                  @default(false)
-  createdAt                DateTime                 @default(now())
-  updatedAt                DateTime                 @updatedAt
-  companyName              String?
-  dob                      DateTime?
-  email                    String?
-  empId                    String?                  @unique
-  riderType                RiderType                @default(INDIVIDUAL_EMPLOYEE)
-  isStackable              Boolean                  @default(false)
-  referredByPartnerId      String?
-  incentivePayouts         IncentivePayout[]
-  Order                    Order[]
-  orderRiderEarnings       OrderRiderEarning[]
-  programEnrollments       ProgramEnrollment[]
-  programPayouts           ProgramPayout[]
-  programProgresses        ProgramProgress[]
-  programTaskProgresses    ProgramTaskProgress[]
-  referralReceived         Referral?                @relation("Referee")
-  referralsGiven           Referral[]               @relation("Referrer")
-  bankDetails              RiderBankDetails?
-  cashInHand               RiderCashInHand?
-  deliveryStatus           RiderDeliveryStatus?
-  gps                      RiderGps?
-  gpsHistory               RiderGpsHistory[]
-  riderIncentiveProgresses RiderIncentiveProgress[]
-  kitAddress               RiderKitAddress?
-  kyc                      RiderKyc?
-  location                 RiderLocation?
-  onboarding               RiderOnboarding?
-  performance              RiderPerformance[]
-  permissions              RiderPermissions?
-  profile                  RiderProfile?
-  ratings                  RiderRating[]
-  selfie                   RiderSelfie?
-  status                   RiderStatus?
-  vehicle                  RiderVehicle?
-  wallet                   RiderWallet?
-  walletTransactions       RiderWalletTransaction[]
-  slotBookings             SlotBooking[]
-  slotRiders               SlotRider[]
-  rider_assets             rider_assets[]
+  id                  String          @id @default(uuid())
+  countryCode         String          @default("+91")
+  phoneNumber         String          @unique
+  phoneIsVerified     Boolean         @default(false)
+  otpCode             String?
+  otpExpiresAt        DateTime?
+  lastOtpVerifiedAt   DateTime?
+  refreshToken        String?
+  deviceToken         String?
+  fcmToken            String?
+  onboardingStage     OnboardingStage @default(PHONE_VERIFICATION)
+  isFullyRegistered   Boolean         @default(false)
+  isOnline            Boolean         @default(false)
+  orderState          OrderState      @default(READY)
+  currentOrderId      String?
+  partnerId           String?         @unique
+  isPartnerActive     Boolean         @default(false)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  companyName         String?
+  dob                 DateTime?
+  email               String?
+  empId               String?         @unique
+  riderType           RiderType       @default(INDIVIDUAL_EMPLOYEE)
+  isStackable         Boolean         @default(false)
+  referredByPartnerId String?
+
+  Order                 Order[]
+  orderRiderEarnings    OrderRiderEarning[]
+  programEnrollments    ProgramEnrollment[]
+  programPayouts        ProgramPayout[]
+  programProgresses     ProgramProgress[]
+  programTaskProgresses ProgramTaskProgress[]
+  referralReceived      Referral?             @relation("Referee")
+  referralsGiven        Referral[]            @relation("Referrer")
+  bankDetails           RiderBankDetails?
+  cashInHand            RiderCashInHand?
+  deliveryStatus        RiderDeliveryStatus?
+  gps                   RiderGps?
+  gpsHistory            RiderGpsHistory[]
+
+  kitAddress         RiderKitAddress?
+  kyc                RiderKyc?
+  location           RiderLocation?
+  onboarding         RiderOnboarding?
+  performance        RiderPerformance[]
+  permissions        RiderPermissions?
+  profile            RiderProfile?
+  ratings            RiderRating[]
+  selfie             RiderSelfie?
+  status             RiderStatus?
+  vehicle            RiderVehicle?
+  wallet             RiderWallet?
+  walletTransactions RiderWalletTransaction[]
+  slotBookings       SlotBooking[]
+  slotRiders         SlotRider[]
+  rider_assets       rider_assets[]
 
   @@index([phoneNumber])
   @@index([isOnline])
@@ -451,103 +451,42 @@ model SlotBooking {
 }
 
 model Order {
-  id                   String                @id @default(uuid())
-  orderId              String                @unique
-  riderId              String?
-  vendorShopName       String
-  orderStatus          OrderStatus           @default(CREATED)
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  totalWeight          Float?
-  riderRatingId        String?
-  Rider                Rider?                @relation(fields: [riderId], references: [id])
-  RiderRating          RiderRating?          @relation(fields: [riderRatingId], references: [id])
-  OrderAllocation      OrderAllocation?
-  OrderCancelIssue     OrderCancelIssue?
-  chats                OrderChat[]
-  OrderCod             OrderCod?
+  id      String  @id @default(uuid())
+  orderId String  @unique
+  riderId String?
+
+  orderStatus      OrderStatus       @default(CREATED)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  totalWeight      Float?
+  durationInKm     Float?
+  durationInMin    Float?
+  riderRatingId    String?
+  Rider            Rider?            @relation(fields: [riderId], references: [id])
+  RiderRating      RiderRating?      @relation(fields: [riderRatingId], references: [id])
+  OrderAllocation  OrderAllocation?
+  OrderCancelIssue OrderCancelIssue?
+
+  chats OrderChat[]
+
   OrderDeliveryAddress OrderDeliveryAddress?
-  OrderItems           OrderItem[]
-  OrderPayment         OrderPayment?
-  OrderPickupAddress   OrderPickupAddress?
-  OrderPricing         OrderPricing?
-  OrderRiderEarning    OrderRiderEarning?
-  OrderSettlement      OrderSettlement?
-  OrderSlotInfo        OrderSlotInfo?
-  OrderTracking        OrderTracking?
+
+  OrderPickupAddress OrderPickupAddress?
+
+  OrderRiderEarning OrderRiderEarning?
+  OrderSettlement   OrderSettlement?
+  OrderSlotInfo     OrderSlotInfo?
 
   @@index([orderStatus])
   @@index([riderId])
   @@index([createdAt])
 }
 
-model OrderItem {
-  id            String      @id @default(uuid())
-  orderId       String
-  itemName      String
-  quantity      Int
-  price         Float
-  total         Float
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  weightPerUnit Float?
-  weightUnit    WeightUnit?
-  Order         Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  @@index([orderId])
-}
-
-model OrderPricing {
-  id                 String @id @default(uuid())
-  orderId            String @unique
-  itemTotal          Float?
-  deliveryFee        Float?
-  tax                Float?
-  platformCommission Float?
-  totalAmount        Float?
-  Order              Order  @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
-
-  @@index([orderId])
-}
-
-model OrderPayment {
-  id             String             @id @default(uuid())
-  orderId        String             @unique
-  mode           OrderPaymentMode
-  codPaymentType CodPaymentType     @default(CASH)
-  status         OrderPaymentStatus @default(PENDING)
-  transactionId  String?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  Order          Order              @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
-
-  @@index([orderId])
-  @@index([mode])
-  @@index([status])
-  @@index([createdAt])
-}
-
-model OrderCod {
-  id              String    @id @default(uuid())
-  orderId         String    @unique
-  amount          Float     @default(0)
-  depositedAmount Float     @default(0)
-  pendingAmount   Float     @default(0)
-  status          CodStatus @default(PENDING)
-  collectedAt     DateTime?
-  depositedAt     DateTime?
-  Order           Order     @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
-
-  @@index([orderId])
-  @@index([status])
-  @@index([collectedAt])
-  @@index([depositedAt])
-}
-
 model OrderPickupAddress {
-  id            String  @id @default(uuid())
-  orderId       String  @unique
-  name          String?
+  id      String @id @default(uuid())
+  orderId String @unique
+
+  merchantName  String?
   addressLine   String?
   contactNumber String?
   latitude      Float?
@@ -613,55 +552,16 @@ model OrderSlotInfo {
   @@index([orderId])
 }
 
-model OrderTracking {
-  id            String   @id @default(uuid())
-  orderId       String   @unique
-  distanceInKm  Float?
-  durationInMin Float?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  Order         Order    @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
-
-  @@index([orderId])
-}
-
 model OrderAllocation {
-  id                   String                @id @default(uuid())
-  orderId              String                @unique
-  assignedAt           DateTime?
-  expiresAt            DateTime?
-  Order                Order                 @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  orderId    String    @unique
+  assignedAt DateTime?
+  expiresAt  DateTime?
+  Order      Order     @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
+
   OrderCandidateRiders OrderCandidateRider[]
 
   @@index([orderId])
-}
-
-model OrderCandidateRider {
-  id                 String           @id @default(uuid())
-  allocationId       String
-  riderId            String
-  status             AllocationStatus @default(PENDING)
-  notifiedAt         DateTime?
-  availabilityScore  Float            @default(0)
-  calculatedAt       DateTime         @default(now())
-  directionScore     Float            @default(0)
-  distanceToCustomer Float            @default(0)
-  distanceToVendor   Float            @default(0)
-  etaToCustomer      Float            @default(0)
-  etaToVendor        Float            @default(0)
-  externalScore      Float            @default(0)
-  orderFitScore      Float            @default(0)
-  performanceScore   Float            @default(0)
-  proximityScore     Float            @default(0)
-  scoringVersion     Int              @default(1)
-  totalScore         Float            @default(0)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  OrderAllocation    OrderAllocation  @relation(fields: [allocationId], references: [id], onDelete: Cascade)
-
-  @@index([allocationId])
-  @@index([riderId])
-  @@index([totalScore])
 }
 
 model OrderCancelIssue {
@@ -685,112 +585,6 @@ model OrderSettlement {
   Order             Order    @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
 
   @@index([orderId])
-}
-
-model RiderIncentiveProgress {
-  id                   String                  @id @default(uuid())
-  riderId              String
-  incentiveId          String
-  incentiveType        IncentiveProgressType
-  date                 String?
-  week                 String?
-  totalOrders          Int                     @default(0)
-  peakOrders           Int                     @default(0)
-  normalOrders         Int                     @default(0)
-  orderIds             String[]
-  slotName             String?
-  slotStart            String?
-  slotEnd              String?
-  slotCompleted        Boolean                 @default(false)
-  eligibleDays         Int                     @default(0)
-  dailyOrderMap        Json?
-  achievedSlabOrders   Int                     @default(0)
-  achievedReward       Float                   @default(0)
-  baseEarning          Float                   @default(0)
-  eligible             Boolean                 @default(false)
-  status               IncentiveProgressStatus @default(IN_PROGRESS)
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
-  completedNormalSlots Int                     @default(0)
-  completedPeakSlots   Int                     @default(0)
-  payouts              IncentivePayout[]
-  incentive            Incentive               @relation(fields: [incentiveId], references: [id])
-  rider                Rider                   @relation(fields: [riderId], references: [id])
-
-  @@unique([riderId, incentiveId, date])
-  @@index([riderId, date])
-  @@index([riderId, week])
-  @@index([incentiveId])
-}
-
-model Incentive {
-  id                 String                   @id @default(uuid())
-  title              String
-  description        String?
-  incentiveType      IncentiveType
-  validFrom          DateTime?
-  validTill          DateTime?
-  applicableCities   String[]
-  applicableZones    String[]
-  minRating          Float?
-  vehicleType        String?
-  minCompletedOrders Int?
-  peakSlotEnabled    Boolean                  @default(false)
-  normalSlotEnabled  Boolean                  @default(false)
-  minPeakSlots       Int?
-  minNormalSlots     Int?
-  payoutTiming       PayoutTiming             @default(POST_SLOT)
-  maxRewardPerDay    Float?
-  maxRewardPerWeek   Float?
-  maxUsagePerRider   Int?
-  priority           Int                      @default(1)
-  totalDaysInWeek    Int                      @default(7)
-  minOrdersPerDay    Int?
-  allowPartialDays   Boolean                  @default(true)
-  status             IncentiveStatus          @default(ACTIVE)
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
-  isLocked           Boolean                  @default(false)
-  lockedAt           DateTime?
-  payouts            IncentivePayout[]
-  slabs              IncentiveSlab[]
-  progress           RiderIncentiveProgress[]
-
-  @@index([status])
-  @@index([incentiveType])
-}
-
-model IncentiveSlab {
-  id           String    @id @default(uuid())
-  incentiveId  String
-  slotType     SlotType
-  minOrders    Int
-  maxOrders    Int
-  rewardAmount Float
-  incentive    Incentive @relation(fields: [incentiveId], references: [id])
-
-  @@index([incentiveId])
-}
-
-model IncentivePayout {
-  id                  String                  @id @default(uuid())
-  incentiveId         String
-  riderId             String
-  progressId          String?
-  earnedAmount        Float
-  payoutStatus        PayoutStatus            @default(PENDING)
-  payoutReferenceId   String?
-  walletTransactionId String?
-  payoutDate          DateTime?
-  creditedAt          DateTime?
-  createdAt           DateTime                @default(now())
-  updatedAt           DateTime                @updatedAt
-  incentive           Incentive               @relation(fields: [incentiveId], references: [id])
-  progress            RiderIncentiveProgress? @relation(fields: [progressId], references: [id])
-  rider               Rider                   @relation(fields: [riderId], references: [id])
-
-  @@index([riderId])
-  @@index([payoutStatus])
 }
 
 model AssetInventory {
@@ -1484,9 +1278,13 @@ enum OrderStatus {
   CREATED
   CONFIRMED
   ASSIGNED
-  PICKED_UP
+  RIDER_EN_ROUTE_TO_PICKUP
+  RIDER_ARRIVED_AT_PICKUP
+  ORDER_PICKED_UP
+  IN_TRANSIT
+  RIDER_ARRIVED_AT_DROP
   DELIVERED
-  CANCELLED
+  DELIVERY_FAILED
 }
 
 enum SurgeType {
@@ -1623,4 +1421,52 @@ enum JoiningBonusType {
   TASK_BASED
   PER_ORDER
   HYBRID
+}
+
+model OrderCandidateRider {
+  id String @id @default(uuid())
+
+  allocationId String
+
+  riderId String
+
+  status AllocationStatus @default(PENDING)
+
+  notifiedAt DateTime?
+
+  availabilityScore Float @default(0)
+
+  calculatedAt DateTime @default(now())
+
+  directionScore Float @default(0)
+
+  distanceToCustomer Float @default(0)
+
+  distanceToVendor Float @default(0)
+
+  etaToCustomer Float @default(0)
+
+  etaToVendor Float @default(0)
+
+  externalScore Float @default(0)
+
+  orderFitScore Float @default(0)
+
+  performanceScore Float @default(0)
+
+  proximityScore Float @default(0)
+
+  scoringVersion Int @default(1)
+
+  totalScore Float @default(0)
+
+  createdAt DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  OrderAllocation OrderAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+
+  @@index([allocationId])
+  @@index([riderId])
+  @@index([totalScore])
 }

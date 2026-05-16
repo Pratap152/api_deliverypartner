@@ -35,8 +35,12 @@ const options = {
 const swaggerSpec = swaggerJSDoc(options);
 
 const swaggerSetup = (app) => {
+  // app.get("/swagger.json", (req, res) => {
+  //   res.setHeader("Content-Type", "application/json");
+  //   res.send(swaggerSpec);
+  // })
   app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   console.log(`Swagger Documentation Loaded →` , process.env.NODE_ENV == "production" ?"https://rider-module.onrender.com/api-docs":`http://localhost:${process.env.PORT}/api-docs`);
 };
 
-module.exports = { swaggerSetup };
+module.exports =  swaggerSetup ;
