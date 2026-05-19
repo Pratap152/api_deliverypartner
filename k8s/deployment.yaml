@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: api-deliverypartner
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: api-deliverypartner
+
+  template:
+    metadata:
+      labels:
+        app: api-deliverypartner
+
+    spec:
+      containers:
+        - name: api-deliverypartner
+
+          image: pratap1371/api-deliverypartner:v1.0.2
+
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 5050
+
+          env:
+            - name: NODE_ENV
+              value: "production"
+
+          envFrom:
+            - secretRef:
+                name: api-secret
