@@ -10,7 +10,8 @@ pipeline {
 
         stage('Clone') {
             steps {
-                git 'https://github.com/Pratap152/api_deliverypartner.git'
+		git branch: 'dev',
+		url: 'https://github.com/Pratap152/api_deliverypartner.git'
             }
         }
 
