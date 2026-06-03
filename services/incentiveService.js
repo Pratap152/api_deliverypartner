@@ -867,11 +867,16 @@ if (isCompleted) {
         // TIME FILTER
         ////////////////////////////////////////////////
 
-const orderTime = new Date();
+const istNow = new Date(
+  new Date().toLocaleString(
+    "en-US",
+    { timeZone: "Asia/Kolkata" }
+  )
+);
 
 const orderMinutes =
-  orderTime.getHours() * 60 +
-  orderTime.getMinutes();
+  istNow.getHours() * 60 +
+  istNow.getMinutes();
 
 if (
   orderMinutes < slot.startMinutes ||
