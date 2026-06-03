@@ -8,7 +8,7 @@ const http = require("http");
 
 const app = require("./app");
 const { onlineWebSocket } = require("./onlineWebSocket");
-
+ 
 const { initWebSocket } = require("./webSocket");
 const {initWebSocketForCall}=require('./webcall')
 // swaggerSetup(app);
@@ -17,10 +17,11 @@ const {initWebSocketForCall}=require('./webcall')
 // ONE HTTP SERVER
 const server = http.createServer(app);
 
+
 // Attach WebSocket to SAME server
 initWebSocket(server);
 initWebSocketForCall(server)
-onlineWebSocket(server);
+// onlineWebSocket(server);
 const PORT = process.env.PORT || 4000;
 
 server.listen(PORT, () => {
