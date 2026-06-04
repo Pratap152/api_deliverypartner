@@ -213,156 +213,554 @@ exports.new_getWeeklyChart = async (req, res) => {
 
 exports.new_getDailyEarnings = async (req, res) => {
   try {
+
     console.log("Hitted new daily earnings controller");
 
-    const riderId = req.rider.id; 
+    const riderId = req.rider.id;
 
     let year, month, day;
 
     if (req.query.date) {
-      const parts = req.query.date.split("-").map(Number);
+
+      const parts =
+        req.query.date.split("-").map(Number);
 
       if (parts.length !== 3) {
         return res.status(400).json({
-          message: "Invalid date format. Use YYYY-MM-DD"
+          message:
+            "Invalid date format. Use YYYY-MM-DD"
         });
       }
 
       [year, month, day] = parts;
+
     } else {
+
       const today = new Date();
+
       year = today.getFullYear();
       month = today.getMonth() + 1;
       day = today.getDate();
     }
 
-    const baseDate = new Date(year, month - 1, day);
+    const baseDate =
+      new Date(year, month - 1, day);
 
-    const startOfDay = new Date(baseDate);
-    startOfDay.setHours(0, 0, 0, 0);
+    const startOfDay =
+      new Date(baseDate);
 
-    const endOfDay = new Date(baseDate);
-    endOfDay.setHours(23, 59, 59, 999);
+    startOfDay.setHours(
+      0,
+      0,
+      0,
+      0
+    );
 
-    const orders = await prisma.order.findMany({
-      where: {
-        riderId: riderId,
-        orderStatus: "DELIVERED",
-        updatedAt: {
-          gte: startOfDay,
-          lte: endOfDay
+    const endOfDay =
+      new Date(baseDate);
+
+    endOfDay.setHours(
+      23,
+      59,
+      59,
+      999
+    );
+
+    // Fetch Orders
+    const orders =
+      await prisma.order.findMany({
+
+        where: {
+          riderId,
+          orderStatus: "DELIVERED",
+          updatedAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        },
+
+        include: {
+          OrderRiderEarning: true
+        },
+
+        orderBy: {
+          updatedAt: "desc"
         }
-      },
-      include: {
-        OrderRiderEarning: true
-      },
-      orderBy: {
-        updatedAt: "desc"
-      }
-    });
+      });
 
-    console.log("orders : " ,orders.length)
+    // Fetch Wallet Transactions
+    const walletTransactions =
+      await prisma.riderWalletTransaction.findMany({
+
+        where: {
+          riderId,
+          createdAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        },
+
+        orderBy: {
+          createdAt: "desc"
+        }
+      });
+
+    console.log(
+      "Orders:",
+      orders.length
+    );
+    console.log(
+      "Transactions:",
+      walletTransactions.length
+    );
 
     let totalEarnings = 0;
     let baseEarnings = 0;
     let incentives = 0;
+
     const items = [];
 
-    orders.forEach(order => {
-      const earning = order.OrderRiderEarning;
+    // DELIVERY ENTRIES
+    for (const order of orders) {
+      const earning =
+        order.OrderRiderEarning || {};
 
-      const amount = earning?.totalEarning || 0;
+      const transaction =
+        walletTransactions.find(
+          txn =>
+            txn.referenceId ===
+              order.orderId ||
 
-      const baseAmount =
-        earning?.basePay || 0;
+            txn.referenceId ===
+              earning.id
+        );
 
-      const incentiveAmount =
-        earning?.surgePay || 0;
+      const amount =
+        earning.totalEarning || 0;
 
       totalEarnings += amount;
 
-      baseEarnings += baseAmount;
+      baseEarnings +=
+        earning.basePay || 0;
 
-      incentives += incentiveAmount;
+      incentives +=
+        earning.surgePay || 0;
 
-      // DELIVERY ENTRY
       items.push({
-        type: "DELIVERY",
-        orderId: order.orderId,
+
+        transactionId:
+          transaction?.id || null,
+
+        orderId:
+          order.orderId,
+
+        type:
+          "DELIVERY",
+
         amount,
-        time: order.updatedAt
+
+        description:
+          "Delivery earning",
+
+        referenceId:
+          transaction?.referenceId ??
+          earning.id ??
+          order.orderId,
+
+        status:
+          transaction?.status ||
+          "CREDITED",
+
+        creditedAt:
+          transaction?.creditedAt ||
+          transaction?.createdAt ||
+          order.updatedAt,
+
+        time:
+          order.updatedAt
+      });
+    }
+
+    // NON DELIVERY TRANSACTIONS
+    walletTransactions.forEach(txn => {
+
+      const alreadyMapped =
+        items.some(
+          item =>
+            item.transactionId ===
+            txn.id
+        );
+
+      if (alreadyMapped)
+        return;
+
+      totalEarnings +=
+        txn.amount;
+
+      items.push({
+
+        transactionId:
+          txn.id,
+
+        orderId:
+          null,
+
+        type:
+          txn.type,
+
+        amount:
+          txn.amount,
+
+        description:
+          txn.description,
+
+        referenceId:
+          txn.referenceId,
+
+        status:
+          txn.status ||
+          "CREDITED",
+
+        creditedAt:
+          txn.creditedAt ||
+          txn.createdAt,
+
+        time:
+          txn.createdAt
       });
 
-      // BONUS ENTRY
-      // if (surgePay > 0) {
-      //   items.push({
-      //     type: "BONUS",
-      //     title: "Peak Hour Bonus",
-      //     amount: surgePay,
-      //     time: order.updatedAt
-      //   });
-      // }
     });
 
-    const responseDate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    // SORT DESC
+    items.sort(
+      (a, b) =>
+        new Date(b.time) -
+        new Date(a.time)
+    );
 
-    res.json({
-      date: responseDate,
-      totalEarnings,
-      baseEarnings,
-      incentives,
+    const responseDate =
+      `${year}-${String(month)
+        .padStart(2, "0")}-${String(day)
+        .padStart(2, "0")}`;
+
+    return res.json({
+
+      date:
+        responseDate,
+
+      totalEarnings:
+        Number(
+          totalEarnings.toFixed(2)
+        ),
+
+      baseEarnings:
+        Number(
+          baseEarnings.toFixed(2)
+        ),
+
+      incentives:
+        Number(
+          incentives.toFixed(2)
+        ),
+
       items,
-      count: items.length
+
+      count:
+        items.length
     });
 
   } catch (err) {
-    console.error("Delivery earnings error:", err);
+
+    console.error(
+      "Daily earnings error:",
+      err
+    );
+
     return res.status(500).json({
-      message: "Internal server error",
-      error: err.message
+
+      message:
+        "Internal server error",
+
+      error:
+        err.message
     });
+
   }
 };
-
 exports.new_getDeliveryEarnings = async (req, res) => {
   try {
-    const riderId = req.rider.id;
-    const { orderId } = req.params;
-    const order = await prisma.order.findFirst({
+
+    const riderId = req.rider?.id;
+    const { id } = req.params;
+
+    console.log("Rider ID:", riderId);
+    console.log("Requested ID:", id);
+
+    if (!id) {
+  return res.status(400).json({
+    success: false,
+    message: "Provide orderId or transactionId"
+  });
+}
+
+let order = null;
+
+// 1. Transaction ID lookup
+const walletTxn =
+  await prisma.riderWalletTransaction.findFirst({
+    where: {
+      id,
+      riderId
+    }
+  });
+
+if (walletTxn) {
+
+  // Incentive transaction
+  if (
+    walletTxn.type === "INCENTIVE"
+  ) {
+
+    return res.json({
+      success: true,
+
+      transaction: {
+
+        transactionId:
+          walletTxn.id,
+
+        type:
+          walletTxn.type,
+
+        amount:
+          walletTxn.amount,
+
+        description:
+          walletTxn.description,
+
+        referenceId:
+          walletTxn.referenceId,
+
+        status:
+          "CREDITED",
+
+        creditedAt:
+          walletTxn.createdAt
+      }
+    });
+
+  }
+
+  // Delivery transaction
+  order =
+    await prisma.order.findFirst({
       where: {
-        riderId: riderId,
-        orderId: orderId
+        orderId:
+          walletTxn.referenceId,
+        riderId
       },
       include: {
         OrderRiderEarning: true
       }
     });
+
+}
+
+// 2. OrderRiderEarning ID lookup
+if (!order) {
+
+  const earning =
+    await prisma.orderRiderEarning.findUnique({
+      where: {
+        id
+      }
+    });
+
+  if (earning) {
+
+    order =
+      await prisma.order.findFirst({
+        where: {
+          id: earning.orderId,
+          riderId
+        },
+        include: {
+          OrderRiderEarning: true
+        }
+      });
+
+  }
+
+}
+
+// 3. Direct Order ID lookup
+if (!order) {
+
+  order =
+    await prisma.order.findFirst({
+      where: {
+        orderId: id,
+        riderId
+      },
+      include: {
+        OrderRiderEarning: true
+      }
+    });
+
+}
+
+    // Fallback lookup if rider mismatch
+if (!order) {
+
+  order = await prisma.order.findFirst({
+    where: {
+      orderId: id,
+      riderId
+    },
+    include: {
+      OrderRiderEarning: true
+    }
+  });
+}
+
     if (!order) {
-      return res.status(404).json({ message: "Order not found" });
+
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
     }
 
-    const riderEarning = order.OrderRiderEarning || {};
+    const earning =
+      order.OrderRiderEarning || {};
 
-    res.json({
-      orderId: order.orderId,
-      store: order.vendorShopName,
+    console.log(
+      "Earning ID:",
+      earning?.id
+    );
 
-      totalEarnings: riderEarning.totalEarning || 0,
+    const transaction =
+      await prisma.riderWalletTransaction.findFirst({
+
+        where: {
+          riderId: order.riderId || riderId,
+
+          OR: [
+            {
+              referenceId:
+                order.orderId
+            },
+            {
+              referenceId:
+                earning?.id || ""
+            }
+          ]
+        },
+
+        orderBy: {
+          createdAt: "desc"
+        }
+      });
+
+    return res.json({
+
+      success: true,
+
+      orderId:
+        order.orderId,
+
+      store:
+        order.vendorShopName,
+
+      totalEarnings:
+        Number(
+          (earning.totalEarning || 0)
+            .toFixed(2)
+        ),
 
       breakup: {
-        basePay: riderEarning.basePay || 0,
-        distancePay: riderEarning.distancePay || 0,
-        surgePay: riderEarning.surgePay || 0,
-        tips: riderEarning.tips || 0
+
+        basePay:
+          Number(
+            (earning.basePay || 0)
+              .toFixed(2)
+          ),
+
+        distancePay:
+          Number(
+            (earning.distancePay || 0)
+              .toFixed(2)
+          ),
+
+        surgePay:
+          Number(
+            (earning.surgePay || 0)
+              .toFixed(2)
+          ),
+
+        tips:
+          Number(
+            (earning.tips || 0)
+              .toFixed(2)
+          )
       },
 
-      status: order.orderStatus,
-      time: order.updatedAt
+      transaction: {
+
+        transactionId:
+          transaction?.id ||
+          earning?.id ||
+          order.orderId,
+
+        type:
+          transaction?.type ||
+          "ORDER_EARNING",
+
+        amount:
+          transaction?.amount ||
+          earning.totalEarning ||
+          0,
+
+        description:
+          transaction?.description ||
+          "Delivery earning",
+
+        referenceId:
+          transaction?.referenceId ||
+          order.orderId,
+
+        status:
+          "CREDITED",
+
+        creditedAt:
+          transaction?.createdAt ||
+          order.updatedAt,
+
+        time:
+          transaction?.createdAt ||
+          order.updatedAt
+      },
+
+      status:
+        order.orderStatus,
+
+      time:
+        order.updatedAt
     });
 
   } catch (err) {
-    console.error("Delivery earnings error:", err);
-    res.status(500).json({ message: "Internal server error" });
+
+    console.error(
+      "Delivery earnings error:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: err.message
+    });
+
   }
 };
 

@@ -880,40 +880,10 @@ const orderMinutes =
   istNow.getHours() * 60 +
   istNow.getMinutes();
 
-console.log("PEAK DEBUG", {
-
-  riderId,
-
-  serverTime:
-    new Date(),
-
-  serverHour:
-    new Date().getHours(),
-
-  istTime:
-    istNow,
-
-  istHour:
-    istNow.getHours(),
-
-  slotStart:
-    slot.startMinutes,
-
-  slotEnd:
-    slot.endMinutes,
-
-  orderMinutes
-});
-
 if (
   orderMinutes < slot.startMinutes ||
   orderMinutes >= slot.endMinutes
 ) {
-
-  console.log(
-    "PEAK SLOT SKIPPED"
-  );
-
   continue;
 }
 

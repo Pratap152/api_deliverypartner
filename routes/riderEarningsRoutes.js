@@ -341,8 +341,11 @@ riderEarningsRouter.get("/new/new_daily", riderAuthMiddleWare, new_getDailyEarni
  */
 
 
-riderEarningsRouter.get("/new/new_delivery/:orderId", riderAuthMiddleWare, new_getDeliveryEarnings);
-
+riderEarningsRouter.get(
+  "/new/new_delivery/:id",
+  riderAuthMiddleWare,
+  new_getDeliveryEarnings
+);
 
 /**
  * @swagger
