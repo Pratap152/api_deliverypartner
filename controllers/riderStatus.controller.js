@@ -181,7 +181,7 @@ exports.goOffline = async (req, res) => {
     }
 
     if (!riderData.isOnline) {
-      return res.status(400).json({
+      return res.status(200).json({
         success: false,
         message: "Rider already offline",
       });
