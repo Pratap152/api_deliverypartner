@@ -1658,47 +1658,54 @@ router.put(
  * @swagger
  * /api/admin/payout-config/update:
  *   patch:
- *     summary: Update Payout Configurations
- *     description: Update payout configurations by tier, cityId, or pincodeIds. Supports both city-level and pincode-level configs using configType query.
+ *     summary: Update payout configuration
+ *     description: |
+ *       Update payout configuration based on Tier, City, or Pincode level.
+ *
+ *       Query Parameters:
+ *       - tier → Update all configs belonging to a city tier.
+ *       - cityId → Update all configs for a specific city.
+ *       - pincodeIds → Update specific pincode-level configs.
+ *
+ *       Optional:
+ *       - configType=city → Only update city-level configs.
+ *       - configType=pincode → Only update pincode-level configs.
+ *
  *     tags:
  *       - Admin Payout Config
- *     security:
- *       - bearerAuth: []
  *
  *     parameters:
  *       - in: query
  *         name: tier
- *         required: false
  *         schema:
  *           type: string
- *           example: TIER_1
- *         description: Update configs by city tier
+ *           enum: [TIER_1, TIER_2, TIER_3]
+ *         required: false
+ *         description: City tier to update.
  *
  *       - in: query
  *         name: cityId
- *         required: false
  *         schema:
  *           type: string
- *           example: city_123
- *         description: Update configs by cityId
+ *           format: uuid
+ *         required: false
+ *         description: City ID to update.
  *
  *       - in: query
  *         name: pincodeIds
- *         required: false
  *         schema:
  *           type: string
- *           example: "500081,500072"
- *         description: Comma separated pincode ids
+ *         required: false
+ *         example: "500001,500002,500003"
+ *         description: Comma-separated pincode IDs.
  *
  *       - in: query
  *         name: configType
- *         required: false
  *         schema:
  *           type: string
- *           enum:
- *             - city
- *             - pincode
- *         description: Filter city-level or pincode-level payout configs
+ *           enum: [city, pincode]
+ *         required: false
+ *         description: Filter city-level or pincode-level configs.
  *
  *     requestBody:
  *       required: true
@@ -1709,11 +1716,11 @@ router.put(
  *             properties:
  *               basePay:
  *                 type: number
- *                 example: 50
+ *                 example: 30
  *
  *               perKmRate:
  *                 type: number
- *                 example: 10
+ *                 example: 5
  *
  *               surgeConfig:
  *                 type: object
@@ -1723,7 +1730,7 @@ router.put(
  *                     example: true
  *                   multiplier:
  *                     type: number
- *                     example: 1.8
+ *                     example: 1.5
  *
  *               peakConfig:
  *                 type: object
@@ -1731,13 +1738,7 @@ router.put(
  *                   enabled:
  *                     type: boolean
  *                     example: true
- *                   startTime:
- *                     type: string
- *                     example: "18:00"
- *                   endTime:
- *                     type: string
- *                     example: "22:00"
- *                   extraPay:
+ *                   bonus:
  *                     type: number
  *                     example: 20
  *
@@ -1747,16 +1748,13 @@ router.put(
  *                   enabled:
  *                     type: boolean
  *                     example: true
- *                   multiplier:
+ *                   bonus:
  *                     type: number
- *                     example: 1.2
- *                   rainExtraPay:
- *                     type: number
- *                     example: 15
+ *                     example: 10
  *
  *     responses:
  *       200:
- *         description: Payout configs updated successfully
+ *         description: Payout configuration updated successfully
  *         content:
  *           application/json:
  *             schema:
@@ -1777,81 +1775,32 @@ router.put(
  *                 updatedFields:
  *                   type: object
  *                   example:
- *                     basePay: 50
- *                     perKmRate: 10
+ *                     basePay: 40
+ *                     perKmRate: 6
  *
  *                 data:
  *                   type: object
- *                   oneOf:
- *                     - properties:
- *                         updatedPincodes:
- *                           type: array
- *                           items:
- *                             type: string
- *                           example:
- *                             - "500081"
- *                             - "500072"
- *
- *                     - properties:
- *                         cityId:
- *                           type: string
- *                           example: city_123
- *
- *                         pincodeIds:
- *                           type: array
- *                           items:
- *                             type: string
- *                           example:
- *                             - "500081"
- *                             - "500072"
- *
- *                     - properties:
- *                         tier:
- *                           type: string
- *                           example: tier1
- *
- *                         cityIds:
- *                           type: array
- *                           items:
- *                             type: string
- *                           example:
- *                             - "city_123"
- *                             - "city_456"
+ *                   example:
+ *                     cityId: "d7f5d1f3-1234-5678-9abc-1234567890ab"
+ *                     pincodeIds:
+ *                       - "500001"
+ *                       - "500002"
  *
  *       400:
- *         description: Validation Error
+ *         description: Invalid request
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *
- *                 message:
- *                   type: string
- *                   examples:
- *                     noFilters:
- *                       value: "Please provide tier or cityId or pincodeIds in query"
- *
- *                     noFields:
- *                       value: "No update fields provided"
+ *             example:
+ *               success: false
+ *               message: Please provide tier or cityId or pincodeIds in query
  *
  *       500:
- *         description: Internal Server Error
+ *         description: Internal server error
  *         content:
  *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *
- *                 message:
- *                   type: string
- *                   example: Something went wrong
+ *             example:
+ *               success: false
+ *               message: Internal server error
  */
 router.patch(
   "/admin/payout-config/update",

@@ -1703,7 +1703,7 @@ const updatePayoutConfig = async (req, res) => {
       weatherConfig,
     } = req.body;
 
-    
+   
 
     if (!tier && !cityId && !pincodeIds) {
       return res.status(400).json({
@@ -1728,8 +1728,9 @@ const updatePayoutConfig = async (req, res) => {
     }
 
 
-    const where = {};
-
+const where = {
+  isActive: true,
+};
     if (tier) {
       where.cityTier = tier;
     }
@@ -1750,7 +1751,25 @@ const updatePayoutConfig = async (req, res) => {
     if (configType === "pincode") {
       where.NOT = { pincodeIds: { isEmpty: true } };
     }
+    console.log("WHERE:", where);
 
+const matchingConfigs = await prisma.payoutConfig.findMany({
+  where,
+  select: {
+    id: true,
+    version: true,
+    basePay: true,
+    perKmRate: true,
+    isActive: true,
+    cityId: true,
+    pincodeIds: true,
+  },
+});
+
+console.log(
+  "MATCHING CONFIGS:",
+  JSON.stringify(matchingConfigs, null, 2)
+);
     
     const result = await prisma.payoutConfig.updateMany({
       where,
