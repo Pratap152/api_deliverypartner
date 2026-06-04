@@ -491,51 +491,139 @@ exports.new_getDeliveryEarnings = async (req, res) => {
   try {
 
     const riderId = req.rider?.id;
-    const { orderId } = req.params;
+    const { id } = req.params;
 
     console.log("Rider ID:", riderId);
-    console.log("Requested Order:", orderId);
+    console.log("Requested ID:", id);
 
-    if (!orderId) {
-      return res.status(400).json({
-        success: false,
-        message: "Provide orderId"
-      });
+    if (!id) {
+  return res.status(400).json({
+    success: false,
+    message: "Provide orderId or transactionId"
+  });
+}
+
+let order = null;
+
+// 1. Transaction ID lookup
+const walletTxn =
+  await prisma.riderWalletTransaction.findFirst({
+    where: {
+      id,
+      riderId
     }
+  });
 
-    // Try strict lookup first
-    let order = await prisma.order.findFirst({
+if (walletTxn) {
+
+  // Incentive transaction
+  if (
+    walletTxn.type === "INCENTIVE"
+  ) {
+
+    return res.json({
+      success: true,
+
+      transaction: {
+
+        transactionId:
+          walletTxn.id,
+
+        type:
+          walletTxn.type,
+
+        amount:
+          walletTxn.amount,
+
+        description:
+          walletTxn.description,
+
+        referenceId:
+          walletTxn.referenceId,
+
+        status:
+          "CREDITED",
+
+        creditedAt:
+          walletTxn.createdAt
+      }
+    });
+
+  }
+
+  // Delivery transaction
+  order =
+    await prisma.order.findFirst({
       where: {
-        riderId,
-        orderId
+        orderId:
+          walletTxn.referenceId,
+        riderId
       },
       include: {
         OrderRiderEarning: true
       }
     });
 
-    // Fallback lookup if rider mismatch
-    if (!order) {
+}
 
-      console.log(
-        "Strict lookup failed. Trying fallback..."
-      );
+// 2. OrderRiderEarning ID lookup
+if (!order) {
 
-      order = await prisma.order.findFirst({
+  const earning =
+    await prisma.orderRiderEarning.findUnique({
+      where: {
+        id
+      }
+    });
+
+  if (earning) {
+
+    order =
+      await prisma.order.findFirst({
         where: {
-          orderId
+          id: earning.orderId,
+          riderId
         },
         include: {
           OrderRiderEarning: true
         }
       });
+
+  }
+
+}
+
+// 3. Direct Order ID lookup
+if (!order) {
+
+  order =
+    await prisma.order.findFirst({
+      where: {
+        orderId: id,
+        riderId
+      },
+      include: {
+        OrderRiderEarning: true
+      }
+    });
+
+}
+
+    // Fallback lookup if rider mismatch
+if (!order) {
+
+  order = await prisma.order.findFirst({
+    where: {
+      orderId: id,
+      riderId
+    },
+    include: {
+      OrderRiderEarning: true
     }
+  });
+}
 
     if (!order) {
-
-      console.log(
-        "Order not found in DB"
-      );
 
       return res.status(404).json({
         success: false,
