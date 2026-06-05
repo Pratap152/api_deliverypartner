@@ -1525,12 +1525,19 @@ async function getOrdersByRider(req, res) {
 
 async function getDeliveredOrdersByRider(req, res) {
   try {
-    const riderId = req.rider._id;
+    console.log(req.rider);
 
-    const orders = await Order.find({
-      riderId,
-      orderStatus: "DELIVERED",
-    }).sort({ createdAt: -1 });
+    const riderId = req.rider.id;
+
+    const orders = await prisma.order.findMany({
+      where: {
+        riderId,
+        orderStatus: "DELIVERED",
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -1540,6 +1547,7 @@ async function getDeliveredOrdersByRider(req, res) {
     });
   } catch (err) {
     console.error("Delivered orders error:", err);
+
     return res.status(500).json({
       success: false,
       message: "Failed to fetch delivered orders",
