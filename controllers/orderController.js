@@ -369,6 +369,7 @@ async function confirmOrder(req, res) {
         message: "No payout config found",
       });
     }
+      console.log("Payout Config from DB:", payoutConfig.basePay);
 
     const {
       basePay,
