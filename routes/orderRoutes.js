@@ -1200,7 +1200,7 @@ router.get("/stats",riderAuthMiddleWare,getOrdersByRider);
  */
 
 
-router.get("/:riderId/delivered",riderAuthMiddleWare,getDeliveredOrdersByRider);
+router.get("/delivered",riderAuthMiddleWare,getDeliveredOrdersByRider);
 
 
 
