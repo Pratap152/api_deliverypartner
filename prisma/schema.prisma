@@ -457,15 +457,15 @@ model SlotBooking {
 }
 
 model Order {
-  id                     String                 @id @default(uuid())
-  orderId                String                 @unique
-  riderId                String?
-  vendorShopName         String
-  orderStatus            OrderStatus            @default(CREATED)
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
-  totalWeight            Float?
-  orderLifecycle         OrderLifecycle         @default(CREATED)
+  id             String      @id @default(uuid())
+  orderId        String      @unique
+  riderId        String?
+  vendorShopName String
+  orderStatus    OrderStatus @default(CREATED)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  totalWeight    Float?
+
   riderRatingId          String?
   Rider                  Rider?                 @relation(fields: [riderId], references: [id])
   RiderRating            RiderRating?           @relation(fields: [riderRatingId], references: [id])
@@ -1521,8 +1521,17 @@ enum OrderStatus {
   CREATED
   CONFIRMED
   ASSIGNED
-  PICKED_UP
+
+  RIDER_EN_ROUTE_TO_PICKUP
+  RIDER_ARRIVED_AT_PICKUP
+
+  PICKED_UP // Use existing enum instead of ORDER_PICKED_UP 
+
+  IN_TRANSIT
+  RIDER_ARRIVED_AT_DROP
+
   DELIVERED
+  DELIVERY_FAILED
   CANCELLED
 }
 
@@ -1760,46 +1769,40 @@ enum CityTier {
   TIER_3
 }
 
-enum OrderLifecycle {
-  CREATED
-  CONFIRMED
-  ASSIGNED
-
-  RIDER_EN_ROUTE_TO_PICKUP
-  RIDER_ARRIVED_AT_PICKUP
-
-  PICKED_UP // Use existing enum instead of ORDER_PICKED_UP 
-
-  IN_TRANSIT
-  RIDER_ARRIVED_AT_DROP
-
-  DELIVERED
-  DELIVERY_FAILED
-  CANCELLED
-}
-
 model EmployeeCompensationConfig {
-  id               String           @id @default(uuid())
-  name             String
-  cityId           String?
-  cityTier         CityTier?
-  pincodeIds       String[]
+  id String @id @default(uuid())
+
+  name       String
+  cityTier   CityTier?
+  cityId     String?
+  pincodeIds String[]
+
   riderType        RiderType
   compensationType CompensationType
-  perOrderAmount   Float?
-  monthlySalary    Float?
-  isActive         Boolean          @default(true)
-  notes            String?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  city             City?            @relation(fields: [cityId], references: [id])
 
-  @@index([cityId, isActive])
-  @@index([cityTier, isActive])
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  salaryConfig SalaryConfig?
+  city         City?         @relation(fields: [cityId], references: [id])
 }
 
 enum CompensationType {
   PER_ORDER
   SALARY
   HYBRID
+}
+
+model SalaryConfig {
+  id String @id @default(uuid())
+
+  configId      String @unique
+  monthlySalary Float
+
+  config EmployeeCompensationConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
