@@ -764,7 +764,7 @@ router.put(
  *           enum: [all, daily, weekly, monthly]
  *         required: false
  *         description: Filter orders by date range
- *         example: monthly
+ *         example: all
  *     responses:
  *       200:
  *         description: Rider order history fetched successfully
