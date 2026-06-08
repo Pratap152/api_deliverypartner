@@ -465,6 +465,7 @@ model Order {
   createdAt              DateTime               @default(now())
   updatedAt              DateTime               @updatedAt
   totalWeight            Float?
+  orderLifecycle         OrderLifecycle         @default(CREATED)
   riderRatingId          String?
   Rider                  Rider?                 @relation(fields: [riderId], references: [id])
   RiderRating            RiderRating?           @relation(fields: [riderRatingId], references: [id])
@@ -608,17 +609,18 @@ model AssetInventory {
 }
 
 model City {
-  id            String         @id @default(cuid())
-  name          String         @unique
-  state         String
-  tier          CityTier?
-  isActive      Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  pincodes      Pincode[]
-  payoutConfigs PayoutConfig[]
-  slotBookings  SlotBooking[]
-  weeklySlots   WeeklySlot[]
+  id                          String                       @id @default(cuid())
+  name                        String                       @unique
+  state                       String
+  tier                        CityTier?
+  isActive                    Boolean                      @default(true)
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
+  pincodes                    Pincode[]
+  payoutConfigs               PayoutConfig[]
+  slotBookings                SlotBooking[]
+  weeklySlots                 WeeklySlot[]
+  employeeCompensationConfigs EmployeeCompensationConfig[]
 }
 
 model Pincode {
@@ -1756,4 +1758,48 @@ enum CityTier {
   TIER_1
   TIER_2
   TIER_3
+}
+
+enum OrderLifecycle {
+  CREATED
+  CONFIRMED
+  ASSIGNED
+
+  RIDER_EN_ROUTE_TO_PICKUP
+  RIDER_ARRIVED_AT_PICKUP
+
+  PICKED_UP // Use existing enum instead of ORDER_PICKED_UP 
+
+  IN_TRANSIT
+  RIDER_ARRIVED_AT_DROP
+
+  DELIVERED
+  DELIVERY_FAILED
+  CANCELLED
+}
+
+model EmployeeCompensationConfig {
+  id               String           @id @default(uuid())
+  name             String
+  cityId           String?
+  cityTier         CityTier?
+  pincodeIds       String[]
+  riderType        RiderType
+  compensationType CompensationType
+  perOrderAmount   Float?
+  monthlySalary    Float?
+  isActive         Boolean          @default(true)
+  notes            String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  city             City?            @relation(fields: [cityId], references: [id])
+
+  @@index([cityId, isActive])
+  @@index([cityTier, isActive])
+}
+
+enum CompensationType {
+  PER_ORDER
+  SALARY
+  HYBRID
 }
