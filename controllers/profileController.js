@@ -1032,6 +1032,9 @@ exports.getRiderOrderHistory = async (req, res) => {
       return {
         orderId: order.orderId,
 
+vendorShopName: order.vendorShopName || "",
+userName: order.OrderDeliveryAddress?.name || "",
+
         items:
           order.OrderItem?.map((item) => ({
             itemName: item.itemName,
