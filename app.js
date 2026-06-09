@@ -40,6 +40,7 @@ const bannerRouter = require("./routes/bannerRoutes")
 const pincodeMetricsRoutes = require(
   "./routes/pincodeMetricsRoutes"
 );
+
 const riderRatingRouter= require("./routes/riderRatingRoutes")
 const app = express();
 
@@ -48,7 +49,8 @@ const app = express();
 const peakSlot=require("./routes/peakSlotRoutes")
 const getPeakSlotProgresses=require("./routes/getPeakSlotProgressRoutes")
 const getRiderIncentive=require("./routes/getAllIncentives.routes")
- 
+ const compensationRoutes=require("./routes/compensationRoutes")
+
 const adminZoneRoutes=require("./routes/adminZoneRoutes");
 
 const riderGpsRoutes = require("./routes/riderGps.routes");
@@ -89,7 +91,8 @@ app.use("/api", riderRouter);
 app.use("/api/location", locationRouter);
 app.use("/aadhar", aadharRoute);
 app.use("/api/bank", bankDetailsRoutes);
- 
+ app.use("/api", compensationRoutes);
+
 app.use("/api/mobile", staticRouter);
  
 app.use("/api/admin", adminRoutes);
