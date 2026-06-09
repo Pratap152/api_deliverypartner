@@ -6,6 +6,8 @@ const {
   confirmOrder,
   // assignOrderToRider,
    acceptOrder,
+   riderEnRouteToPickup,
+   riderArrivedAtPickup,
    rejectOrder,
    getOrderDetails,
    pickupOrder,
@@ -15,7 +17,9 @@ const {
     getDeliveredOrdersByRider,
     getCancelledOrdersByRider,
     getSurgeStatus,
-    OrderDetailsStored
+    OrderDetailsStored,
+    markOrderInTransit,
+    riderArrivedAtDrop
 } = require("../controllers/orderController");
 
 const { riderAuthMiddleWare } = require("../middleware/riderAuthMiddleware");
@@ -600,6 +604,198 @@ router.patch("/:orderId/confirm", confirmOrder);
 
 router.patch("/:orderId/accept",riderAuthMiddleWare, acceptOrder);
 
+
+
+/**
+ * @swagger
+ * /api/orders/{orderId}/en-route-pickup:
+ *   patch:
+ *     summary: Mark rider as en route to pickup location
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Order ID
+ *     responses:
+ *       200:
+ *         description: Rider is en route to pickup location
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Rider is en route to pickup location
+ *                 orderStatus:
+ *                   type: string
+ *                   example: RIDER_EN_ROUTE_TO_PICKUP
+ *
+ *       400:
+ *         description: Validation error or invalid order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid status: ASSIGNED"
+ *
+ *       403:
+ *         description: Order not assigned to this rider
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Not assigned to this order
+ *
+ *       404:
+ *         description: Order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Order not found
+ *
+ *       500:
+ *         description: Failed to update order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Failed to update order status
+ */
+router.patch("/:orderId/en-route-pickup",riderAuthMiddleWare,riderEnRouteToPickup);
+
+/**
+ * @swagger
+ * /api/orders/{orderId}/arrived-pickup:
+ *   patch:
+ *     summary: Mark rider as arrived at pickup location
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Order ID
+ *     responses:
+ *       200:
+ *         description: Rider arrived at pickup location successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Rider arrived at pickup location
+ *                 orderStatus:
+ *                   type: string
+ *                   example: RIDER_ARRIVED_AT_PICKUP
+ *
+ *       400:
+ *         description: Validation error or invalid order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid status: ASSIGNED"
+ *
+ *       403:
+ *         description: Order not assigned to this rider
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Not assigned to this order
+ *
+ *       404:
+ *         description: Order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Order not found
+ *
+ *       500:
+ *         description: Failed to update order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Failed to update order status
+ */
+router.patch("/:orderId/arrived-pickup",riderAuthMiddleWare,riderArrivedAtPickup);
+
+
+
+
+
+
+
 // ================================
 // RIDER REJECT ORDER
 // ================================
@@ -664,148 +860,6 @@ router.patch("/:orderId/accept",riderAuthMiddleWare, acceptOrder);
  */
 
  router.patch("/:orderId/reject",riderAuthMiddleWare, rejectOrder);
-
-// ================================
-// GET ORDER DETAILS
-// ================================
-
-/**
- * @swagger
- * /api/orders/{orderId}/details:
- *   get:
- *     tags:
- *       - Orders
- *     summary: Get order details by orderId
- *     description: >
- *       Fetches limited order details using the orderId.
- *       Only selected fields like items, addresses, and pricing are returned.
- *       Rider, allocation, payment, and settlement details are intentionally excluded.
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         description: Unique order ID
- *         schema:
- *           type: string
- *           example: ORD-F95B0DB0
- *     responses:
- *       200:
- *         description: Order details fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Order details fetched successfully
- *                 filteredOrder:
- *                   type: object
- *                   properties:
- *                     _id:
- *                       type: string
- *                       example: 6971bf46b086deb130aac60b
- *                     orderId:
- *                       type: string
- *                       example: ORD-F95B0DB0
- *                     vendorShopName:
- *                       type: string
- *                       example: Daily Needs Store
- *                     items:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           itemName:
- *                             type: string
- *                             example: Basmati Rice
- *                           quantity:
- *                             type: number
- *                             example: 5
- *                           price:
- *                             type: number
- *                             example: 60
- *                           total:
- *                             type: number
- *                             example: 300
- *                     pickupAddress:
- *                       type: object
- *                       properties:
- *                         name:
- *                           type: string
- *                           example: Daily Needs Store
- *                         lat:
- *                           type: number
- *                           example: 17.42
- *                         lng:
- *                           type: number
- *                           example: 78.39
- *                         addressLine:
- *                           type: string
- *                           example: Miyapur
- *                         contactNumber:
- *                           type: string
- *                           example: "9012345679"
- *                     deliveryAddress:
- *                       type: object
- *                       properties:
- *                         name:
- *                           type: string
- *                           example: Anil Sharma
- *                         lat:
- *                           type: number
- *                           example: 17.46
- *                         lng:
- *                           type: number
- *                           example: 78.41
- *                         addressLine:
- *                           type: string
- *                           example: Kukatpally
- *                         contactNumber:
- *                           type: string
- *                           example: "9898989896"
- *                     pricing:
- *                       type: object
- *                       properties:
- *                         itemTotal:
- *                           type: number
- *                           example: 580
- *                         deliveryFee:
- *                           type: number
- *                           example: 0
- *                         tax:
- *                           type: number
- *                           example: 0
- *                         platformCommission:
- *                           type: number
- *                           example: 0
- *                         totalAmount:
- *                           type: number
- *                           example: 580
- *       404:
- *         description: Order not found
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: Order not found
- *       500:
- *         description: Internal server error
- */
-router.get("/:orderId/details", getOrderDetails);
-
-
-
-
 
 // ================================
 // PICKUP ORDER
@@ -899,6 +953,196 @@ router.get("/:orderId/details", getOrderDetails);
 
 
 router.patch("/:orderId/pickup",riderAuthMiddleWare, pickupOrder);
+
+
+/**
+ * @swagger
+ * /api/orders/{orderId}/in-transit:
+ *   patch:
+ *     summary: Mark order as in transit
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Order ID
+ *     responses:
+ *       200:
+ *         description: Order marked as in transit successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Order is now in transit
+ *                 orderStatus:
+ *                   type: string
+ *                   example: IN_TRANSIT
+ *
+ *       400:
+ *         description: Validation error or invalid order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid status: CREATED"
+ *
+ *       403:
+ *         description: Order not assigned to this rider
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Not assigned to this order
+ *
+ *       404:
+ *         description: Order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Order not found
+ *
+ *       500:
+ *         description: Failed to update order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Failed to update order status
+ */
+router.patch("/:orderId/in-transit",riderAuthMiddleWare,markOrderInTransit);
+
+
+
+
+
+/**
+ * @swagger
+ * /api/orders/{orderId}/arrived-drop:
+ *   patch:
+ *     summary: Mark rider as arrived at drop location
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Order ID
+ *     responses:
+ *       200:
+ *         description: Rider arrived at drop location successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Rider arrived at drop location
+ *                 orderStatus:
+ *                   type: string
+ *                   example: RIDER_ARRIVED_AT_DROP
+ *
+ *       400:
+ *         description: Validation error or invalid order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid status: PICKED_UP"
+ *
+ *       403:
+ *         description: Order not assigned to this rider
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Not assigned to this order
+ *
+ *       404:
+ *         description: Order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Order not found
+ *
+ *       500:
+ *         description: Failed to update order status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Failed to update order status
+ */
+router.patch("/:orderId/arrived-drop",riderAuthMiddleWare,riderArrivedAtDrop);
+
 
 /*
 ////////////////////////////////////////
@@ -1093,6 +1337,144 @@ router.patch("/:orderId/deliver",riderAuthMiddleWare,deliverOrder);
 
 router.patch("/:orderId/cancel",riderAuthMiddleWare,cancelOrder);
 
+
+// ================================
+// GET ORDER DETAILS
+// ================================
+
+/**
+ * @swagger
+ * /api/orders/{orderId}/details:
+ *   get:
+ *     tags:
+ *       - Orders
+ *     summary: Get order details by orderId
+ *     description: >
+ *       Fetches limited order details using the orderId.
+ *       Only selected fields like items, addresses, and pricing are returned.
+ *       Rider, allocation, payment, and settlement details are intentionally excluded.
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         description: Unique order ID
+ *         schema:
+ *           type: string
+ *           example: ORD-F95B0DB0
+ *     responses:
+ *       200:
+ *         description: Order details fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Order details fetched successfully
+ *                 filteredOrder:
+ *                   type: object
+ *                   properties:
+ *                     _id:
+ *                       type: string
+ *                       example: 6971bf46b086deb130aac60b
+ *                     orderId:
+ *                       type: string
+ *                       example: ORD-F95B0DB0
+ *                     vendorShopName:
+ *                       type: string
+ *                       example: Daily Needs Store
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           itemName:
+ *                             type: string
+ *                             example: Basmati Rice
+ *                           quantity:
+ *                             type: number
+ *                             example: 5
+ *                           price:
+ *                             type: number
+ *                             example: 60
+ *                           total:
+ *                             type: number
+ *                             example: 300
+ *                     pickupAddress:
+ *                       type: object
+ *                       properties:
+ *                         name:
+ *                           type: string
+ *                           example: Daily Needs Store
+ *                         lat:
+ *                           type: number
+ *                           example: 17.42
+ *                         lng:
+ *                           type: number
+ *                           example: 78.39
+ *                         addressLine:
+ *                           type: string
+ *                           example: Miyapur
+ *                         contactNumber:
+ *                           type: string
+ *                           example: "9012345679"
+ *                     deliveryAddress:
+ *                       type: object
+ *                       properties:
+ *                         name:
+ *                           type: string
+ *                           example: Anil Sharma
+ *                         lat:
+ *                           type: number
+ *                           example: 17.46
+ *                         lng:
+ *                           type: number
+ *                           example: 78.41
+ *                         addressLine:
+ *                           type: string
+ *                           example: Kukatpally
+ *                         contactNumber:
+ *                           type: string
+ *                           example: "9898989896"
+ *                     pricing:
+ *                       type: object
+ *                       properties:
+ *                         itemTotal:
+ *                           type: number
+ *                           example: 580
+ *                         deliveryFee:
+ *                           type: number
+ *                           example: 0
+ *                         tax:
+ *                           type: number
+ *                           example: 0
+ *                         platformCommission:
+ *                           type: number
+ *                           example: 0
+ *                         totalAmount:
+ *                           type: number
+ *                           example: 580
+ *       404:
+ *         description: Order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get("/:orderId/details", getOrderDetails);
 
 
 
@@ -1320,8 +1702,5 @@ router.get("/rider/surge-status", riderAuthMiddleWare, getSurgeStatus);
 
 
 router.post("/rider/store-order-details", OrderDetailsStored);
-
-
-
 
 module.exports = router;
