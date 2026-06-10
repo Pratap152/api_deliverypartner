@@ -1772,33 +1772,27 @@ model EmployeeCompensationConfig {
   cityTier   CityTier?
   cityId     String?
   pincodeIds String[]
-
+  trackingType TrackingType?
   riderType        RiderType
   compensationType CompensationType
 
+  // Compensation
+  monthlySalary  Float?
+  perOrderAmount Float?
+
+  // Monthly Targets
+  targetOrders Int?
+
   isActive Boolean @default(true)
+
+  city City? @relation(fields: [cityId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  salaryConfig SalaryConfig?
-  city         City?         @relation(fields: [cityId], references: [id])
 }
 
 enum CompensationType {
   PER_ORDER
   SALARY
   HYBRID
-}
-
-model SalaryConfig {
-  id String @id @default(uuid())
-
-  configId      String @unique
-  monthlySalary Float
-
-  config EmployeeCompensationConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
