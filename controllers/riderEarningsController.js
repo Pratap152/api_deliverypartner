@@ -1,11 +1,29 @@
 const prisma = require('../config/prisma');
 
 const { getISOWeekRange, getCurrentISOWeek } = require("../helpers/getWeekNumber");
-
+async function getEmployeeConfig(riderType) {
+  return prisma.employeeCompensationConfig.findFirst({
+    where: {
+      riderType,
+      isActive: true
+    }
+  });
+}
 exports.new_getEarningsSummary = async (req, res) => {
   try {
     const riderId = req.rider.id;
+const rider =
+  await prisma.rider.findUnique({
+    where: {
+      id: riderId
+    },
+    select: {
+      riderType: true
+    }
+  });
 
+const riderType =
+  rider?.riderType;
     const now = new Date();
 
     const todayStart = new Date(now);
@@ -33,7 +51,17 @@ exports.new_getEarningsSummary = async (req, res) => {
         OrderRiderEarning: true
       }
     });
-
+const programProgresses =
+  await prisma.programProgress.findMany({
+    where: {
+      riderId,
+      achieved: true,
+      date: {
+        gte: monthStart,
+        lte: todayEnd
+      }
+    }
+  });
     let todayOrders = 0;
     let todayTotal = 0;
     let todayBase = 0;
@@ -56,38 +84,147 @@ exports.new_getEarningsSummary = async (req, res) => {
       const deliveredAt = new Date(order.updatedAt);
       const earning = order.OrderRiderEarning || {};
 
-      const totalEarning = earning.totalEarning || 0;
-      const basePay = earning.basePay || 0;
-      const incentive = earning.surgePay || 0;
-      const tips = earning.tips || 0;
+const baseAmount =
+  earning.totalEarning || 0;
 
       //Today
       if (deliveredAt >= todayStart && deliveredAt <= todayEnd) {
         todayOrders += 1;
-        todayTotal += totalEarning;
-        todayBase += basePay;
-        todayIncentives += incentive;
-        todayTips += tips;
+       todayBase += baseAmount;
       }
 
       // ---- THIS WEEK ----
       if (deliveredAt >= weekStart && deliveredAt <= weekEnd) {
         weekOrders += 1;
-        weekBase += basePay;
-        weekIncentives += incentive;
-        weekTips += tips;
-        weekTotal += totalEarning;
+       weekBase += baseAmount;
       }
 
       //MONTH 
       monthOrders += 1;
-      monthBase += basePay;
-      monthIncentives += incentive;
-      monthTips += tips;
-      monthTotal += totalEarning;
+      monthBase += baseAmount;
     });
+    programProgresses.forEach(progress => {
 
-    res.json({
+  const reward =
+    progress.rewardAmount || 0;
+
+  const progressDate =
+    new Date(progress.date);
+
+  if (
+    progressDate >= todayStart &&
+    progressDate <= todayEnd
+  ) {
+    todayIncentives += reward;
+  }
+
+  if (
+    progressDate >= weekStart &&
+    progressDate <= weekEnd
+  ) {
+    weekIncentives += reward;
+  }
+
+  monthIncentives += reward;
+
+});
+todayTotal =
+  todayBase +
+  todayIncentives;
+
+weekTotal =
+  weekBase +
+  weekIncentives;
+
+monthTotal =
+  monthBase +
+  monthIncentives;
+if (riderType === "ZESTBOT_EMPLOYEE") {
+
+const config =
+  await getEmployeeConfig(
+    "ZESTBOT_EMPLOYEE"
+  );
+
+const monthlyTarget =
+  config?.targetOrders || 0;
+const completedOrders =
+  await prisma.order.count({
+    where: {
+      riderId,
+      orderStatus: "DELIVERED",
+      updatedAt: {
+        gte: new Date(
+          new Date().getFullYear(),
+          new Date().getMonth(),
+          1
+        )
+      }
+    }
+  });
+const monthlySalary =
+  config?.monthlySalary || 0;
+
+let zestbotIncentive = 0;
+
+if (
+  monthlyTarget > 0 &&
+  completedOrders >= monthlyTarget
+) {
+
+  zestbotIncentive =
+    monthBase +
+    monthIncentives;
+}
+  return res.json({
+
+    riderType,
+
+    today: {
+      orders: todayOrders,
+      baseEarnings: 0,
+      incentives: 0,
+      tips: 0,
+      total: 0
+    },
+
+    week: {
+      orders: weekOrders,
+      baseEarnings: 0,
+      incentives: 0,
+      tips: 0,
+      total: 0
+    },
+
+month: {
+  orders: monthOrders,
+  baseEarnings: monthlySalary,
+  incentives: zestbotIncentive,
+  tips: 0,
+  total:
+    monthlySalary +
+    zestbotIncentive
+},
+   target: {
+  monthlyTarget,
+  completedOrders,
+  remainingOrders:
+    Math.max(monthlyTarget - completedOrders, 0),
+
+  completionPercentage:
+    monthlyTarget > 0
+      ? Math.round((completedOrders / monthlyTarget) * 100)
+      : 0,
+
+  eligible:
+    monthlyTarget > 0 &&
+    completedOrders >= monthlyTarget
+}
+  });
+}
+
+   res.json({
+  riderType,
       today: {
         orders: todayOrders,
         baseEarnings: todayBase,
@@ -187,7 +324,71 @@ exports.new_getWeeklyChart = async (req, res) => {
         orders: data.orders
       });
     }
+if (riderType === "ZESTBOT_EMPLOYEE") {
 
+const config =
+  await getEmployeeConfig(
+    "ZESTBOT_EMPLOYEE"
+  );
+
+const monthlyTarget =
+  config?.targetOrders || 0;
+
+const monthlySalary =
+  config?.monthlySalary || 0;
+  const completedOrders =
+    await prisma.order.count({
+      where: {
+        riderId,
+        orderStatus: "DELIVERED",
+        updatedAt: {
+          gte: new Date(
+            new Date().getFullYear(),
+            new Date().getMonth(),
+            1
+          )
+        }
+      }
+    });
+  return res.json({
+
+    riderType,
+
+    monthlyTarget,
+
+    completedOrders,
+
+    remainingOrders:
+      Math.max(
+        monthlyTarget -
+        completedOrders,
+        0
+      ),
+
+   targetIncentive:
+  completedOrders >= monthlyTarget
+    ? week.reduce(
+        (sum, d) => sum + d.amount,
+        0
+      )
+    : 0,
+
+    eligible:
+      completedOrders >=
+      monthlyTarget,
+
+   week: week.map(day => ({
+  day: day.day,
+
+  amount:
+    completedOrders >= monthlyTarget
+      ? day.amount
+      : 0,
+
+  orders: day.orders
+}))
+  });
+}
     if (riderType === "COMPANY_EMPLOYEE") {
       return res.json({
         riderType,
@@ -217,7 +418,18 @@ exports.new_getDailyEarnings = async (req, res) => {
     console.log("Hitted new daily earnings controller");
 
     const riderId = req.rider.id;
+const rider =
+  await prisma.rider.findUnique({
+    where: {
+      id: riderId
+    },
+    select: {
+      riderType: true
+    }
+  });
 
+const riderType =
+  rider?.riderType;
     let year, month, day;
 
     if (req.query.date) {
@@ -304,15 +516,17 @@ exports.new_getDailyEarnings = async (req, res) => {
           createdAt: "desc"
         }
       });
-
-    console.log(
-      "Orders:",
-      orders.length
-    );
-    console.log(
-      "Transactions:",
-      walletTransactions.length
-    );
+const programProgresses =
+  await prisma.programProgress.findMany({
+    where: {
+      riderId,
+      achieved: true,
+      date: {
+        gte: startOfDay,
+        lte: endOfDay
+      }
+    }
+  });
 
     let totalEarnings = 0;
     let baseEarnings = 0;
@@ -335,52 +549,35 @@ exports.new_getDailyEarnings = async (req, res) => {
               earning.id
         );
 
-      const amount =
-        earning.totalEarning || 0;
+const amount =
+  earning.totalEarning || 0;
 
-      totalEarnings += amount;
+baseEarnings += amount;
 
-      baseEarnings +=
-        earning.basePay || 0;
-
-      incentives +=
-        earning.surgePay || 0;
-
-      items.push({
-
-        transactionId:
-          transaction?.id || null,
-
-        orderId:
-          order.orderId,
-
-        type:
-          "DELIVERY",
-
-        amount,
-
-        description:
-          "Delivery earning",
-
-        referenceId:
-          transaction?.referenceId ??
-          earning.id ??
-          order.orderId,
-
-        status:
+items.push({
+  transactionId: transaction?.id || null,
+  orderId: order.orderId,
+  type: "DELIVERY",
+  amount,
+  description: "Delivery earning",
+  referenceId:
+    transaction?.referenceId ??
+    earning.id ??
+    order.orderId,
+status:
           transaction?.status ||
-          "CREDITED",
+          "CREDITED",  
 
-        creditedAt:
-          transaction?.creditedAt ||
-          transaction?.createdAt ||
-          order.updatedAt,
-
-        time:
-          order.updatedAt
-      });
+          creditedAt:
+    transaction?.creditedAt ||
+    transaction?.createdAt ||
+    order.updatedAt,
+  time: order.updatedAt
+});
     }
-
+for (const progress of programProgresses) {
+  incentives += progress.rewardAmount || 0;
+}
     // NON DELIVERY TRANSACTIONS
     walletTransactions.forEach(txn => {
 
@@ -394,7 +591,7 @@ exports.new_getDailyEarnings = async (req, res) => {
       if (alreadyMapped)
         return;
 
-      totalEarnings +=
+totalEarnings +=
         txn.amount;
 
       items.push({
@@ -437,39 +634,123 @@ exports.new_getDailyEarnings = async (req, res) => {
         new Date(b.time) -
         new Date(a.time)
     );
-
+totalEarnings =
+  baseEarnings +
+  incentives;
     const responseDate =
       `${year}-${String(month)
         .padStart(2, "0")}-${String(day)
         .padStart(2, "0")}`;
+if (
+  riderType ===
+  "ZESTBOT_EMPLOYEE"
+) {
 
-    return res.json({
+const config =
+  await getEmployeeConfig(
+    "ZESTBOT_EMPLOYEE"
+  );
 
-      date:
-        responseDate,
+const monthlyTarget =
+  config?.targetOrders || 0;
 
-      totalEarnings:
-        Number(
-          totalEarnings.toFixed(2)
-        ),
+const monthlySalary =
+  config?.monthlySalary || 0;
+  const completedOrders =
+    await prisma.order.count({
 
-      baseEarnings:
-        Number(
-          baseEarnings.toFixed(2)
-        ),
+      where: {
 
-      incentives:
-        Number(
-          incentives.toFixed(2)
-        ),
+        riderId,
 
-      items,
+        orderStatus: "DELIVERED",
 
-      count:
-        items.length
+        updatedAt: {
+          gte: new Date(
+            new Date().getFullYear(),
+            new Date().getMonth(),
+            1
+          )
+        }
+      }
     });
 
-  } catch (err) {
+const eligible =
+  monthlyTarget > 0 &&
+  completedOrders >= monthlyTarget;
+
+return res.json({
+
+  riderType,
+
+  date: responseDate,
+
+  monthlyTarget,
+
+  completedOrders,
+
+  remainingOrders:
+    Math.max(
+      monthlyTarget -
+      completedOrders,
+      0
+    ),
+
+  totalEarnings:
+    eligible
+      ? totalEarnings
+      : 0,
+
+  baseEarnings: 0,
+
+  incentives:
+    eligible
+      ? totalEarnings
+      : 0,
+
+  items: items.map(item => ({
+
+    ...item,
+
+    amount:
+      eligible
+        ? item.amount
+        : 0,
+
+    remark:
+      !eligible
+        ? `${Math.max(
+            monthlyTarget -
+            completedOrders,
+            0
+          )} orders remaining for incentive eligibility`
+        : undefined
+  })),
+
+  count: items.length
+});
+}
+return res.json({
+
+  riderType,
+
+  date: responseDate,
+
+  totalEarnings:
+    Number(totalEarnings.toFixed(2)),
+
+  baseEarnings:
+    Number(baseEarnings.toFixed(2)),
+
+  incentives:
+    Number(incentives.toFixed(2)),
+
+  items,
+
+  count: items.length
+});
+}
+ catch (err) {
 
     console.error(
       "Daily earnings error:",
@@ -491,6 +772,18 @@ exports.new_getDeliveryEarnings = async (req, res) => {
   try {
 
     const riderId = req.rider?.id;
+    const rider =
+  await prisma.rider.findUnique({
+    where: {
+      id: riderId
+    },
+    select: {
+      riderType: true
+    }
+  });
+
+const riderType =
+  rider?.riderType;
     const { id } = req.params;
 
     console.log("Rider ID:", riderId);
@@ -661,10 +954,63 @@ if (!order) {
           createdAt: "desc"
         }
       });
+      const config =
+  await getEmployeeConfig(
+    riderType
+  );
 
-    return res.json({
+const targetOrders =
+  config?.targetOrders || 0;
 
-      success: true,
+const completedOrders =
+  await prisma.order.count({
+    where: {
+      riderId,
+      orderStatus: "DELIVERED",
+      updatedAt: {
+        gte: new Date(
+          new Date().getFullYear(),
+          new Date().getMonth(),
+          1
+        )
+      }
+    }
+  });
+const eligible =
+  targetOrders > 0 &&
+  completedOrders >= targetOrders;
+
+if (
+  riderType === "ZESTBOT_EMPLOYEE" &&
+  !eligible
+) {
+  return res.json({
+    riderType,
+
+    orderId: order.orderId,
+    store: order.vendorShopName,
+
+    totalEarnings: null,
+    breakup: null,
+
+    targetProgress: {
+      targetOrders,
+      completedOrders,
+      remainingOrders:
+        Math.max(
+          targetOrders -
+          completedOrders,
+          0
+        )
+    },
+
+    status: order.orderStatus,
+    time: order.updatedAt
+  });
+}
+  return res.json({
+  riderType,
+  success: true,
 
       orderId:
         order.orderId,
@@ -774,7 +1120,18 @@ function toISTDate(date) {
 exports.new_getWeeklyEarnings = async (req, res) => {
   try {
     const riderId = req.rider.id || req.rider._id;
-  
+  const rider =
+  await prisma.rider.findUnique({
+    where: {
+      id: riderId
+    },
+    select: {
+      riderType: true
+    }
+  });
+
+const riderType =
+  rider?.riderType;
     let { week, year } = req.query;
 
     if (!week || !year) {
@@ -869,7 +1226,92 @@ exports.new_getWeeklyEarnings = async (req, res) => {
     //     }))
     //   });
     // }
+    const config =
+  await getEmployeeConfig(
+    riderType
+  );
 
+const targetOrders =
+  config?.targetOrders || 0;
+
+const completedOrders =
+  await prisma.order.count({
+    where: {
+      riderId: String(riderId),
+      orderStatus: "DELIVERED",
+      updatedAt: {
+        gte: new Date(
+          new Date().getFullYear(),
+          new Date().getMonth(),
+          1
+        )
+      }
+    }
+  });
+if (
+  riderType ===
+  "ZESTBOT_EMPLOYEE"
+){
+
+  return res.json({
+
+    riderType,
+
+    week:
+      Number(week),
+
+    year:
+      Number(year),
+
+    weekRange:
+      `${toISTDate(start).toDateString()} - ${toISTDate(end).toDateString()}`,
+
+    targetProgress: {
+
+      targetOrders,
+
+      completedOrders,
+
+      remainingOrders:
+        Math.max(
+          targetOrders -
+          completedOrders,
+          0
+        )
+    },
+
+    totalOrders:
+  days.reduce(
+    (sum, d) => sum + d.orders,
+    0
+  ),
+
+    days:
+      days.map(
+        day => ({
+
+          day:
+            day.day,
+
+          date:
+            day.date,
+
+          orders:
+            day.orders,
+
+          deliveries:
+            day.deliveries.map(
+              d => ({
+                orderId:
+                  d.orderId,
+                time:
+                  d.time
+              })
+            )
+        })
+      )
+  });
+}
     const total = days.reduce((sum, d) => sum + d.amount, 0);
 
     const lastWeekStart = new Date(start);
@@ -902,14 +1344,15 @@ exports.new_getWeeklyEarnings = async (req, res) => {
         : 0;
 
 
-    res.json({
-      week: Number(week),
-      year: Number(year),
-      weekRange: `${toISTDate(start).toDateString()} - ${toISTDate(end).toDateString()}`,
-      total,
-      changePercent,
-      days
-    });
+res.json({
+  riderType,
+  week: Number(week),
+  year: Number(year),
+  weekRange:`${toISTDate(start).toDateString()} - ${toISTDate(end).toDateString()}`,
+  total,
+  changePercent,
+  days
+});
 
   } catch (err) {
     console.error("Weekly earnings error:", err);
