@@ -369,6 +369,7 @@ async function confirmOrder(req, res) {
         message: "No payout config found",
       });
     }
+      
 
     const {
       basePay,
@@ -1050,7 +1051,7 @@ async function pickupOrder(req, res) {
       });
     }
 
-    if (order.orderStatus !== "ASSIGNED") {
+    if (order.orderStatus !== "RIDER_ARRIVED_AT_PICKUP") {
       return res.status(400).json({
         success: false,
         message: "Order is not ready for pickup",
@@ -1151,7 +1152,7 @@ async function deliverOrder(req, res) {
       });
     }
 
-    if (order.orderStatus !== "PICKED_UP") {
+    if (order.orderStatus !== "RIDER_ARRIVED_AT_DROP") {
       return res.status(400).json({
         success: false,
         message: `Invalid status: ${order.orderStatus}`,
@@ -2050,6 +2051,326 @@ async function OrderDetailsStored(req, res) {
   }
 }
 
+async function riderEnRouteToPickup(req, res) {
+  try {
+    const { orderId } = req.params;
+    const riderId = req.rider?.id;
+
+    ////////////////////////////////////////////////////
+    // VALIDATION
+    ////////////////////////////////////////////////////
+
+    if (!riderId) {
+      return res.status(400).json({
+        success: false,
+        message: "riderId required",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // FETCH ORDER
+    ////////////////////////////////////////////////////
+
+    const order = await prisma.order.findUnique({
+      where: { orderId },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // ORDER SHOULD BE ASSIGNED
+    ////////////////////////////////////////////////////
+
+    if (order.orderStatus !== "ASSIGNED") {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status: ${order.orderStatus}`,
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // ENSURE ORDER BELONGS TO RIDER
+    ////////////////////////////////////////////////////
+
+    if (order.riderId !== riderId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not assigned to this order",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // UPDATE STATUS
+    ////////////////////////////////////////////////////
+
+    await prisma.order.update({
+      where: { orderId },
+      data: {
+        orderStatus: "RIDER_EN_ROUTE_TO_PICKUP",
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Rider is en route to pickup location",
+      orderStatus: "RIDER_EN_ROUTE_TO_PICKUP",
+    });
+
+  } catch (err) {
+    console.error("En route pickup error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update order status",
+    });
+  }
+}
+
+async function riderArrivedAtPickup(req, res) {
+  try {
+    const { orderId } = req.params;
+    const riderId = req.rider?.id;
+
+    ////////////////////////////////////////////////////
+    // VALIDATION
+    ////////////////////////////////////////////////////
+
+    if (!riderId) {
+      return res.status(400).json({
+        success: false,
+        message: "riderId required",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // FETCH ORDER
+    ////////////////////////////////////////////////////
+
+    const order = await prisma.order.findUnique({
+      where: { orderId },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // VALID STATUS CHECK
+    ////////////////////////////////////////////////////
+
+    if (order.orderStatus !== "RIDER_EN_ROUTE_TO_PICKUP") {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status: ${order.orderStatus}`,
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // VERIFY RIDER
+    ////////////////////////////////////////////////////
+
+    if (order.riderId !== riderId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not assigned to this order",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // UPDATE STATUS
+    ////////////////////////////////////////////////////
+
+    await prisma.order.update({
+      where: { orderId },
+      data: {
+        orderStatus: "RIDER_ARRIVED_AT_PICKUP",
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Rider arrived at pickup location",
+      orderStatus: "RIDER_ARRIVED_AT_PICKUP",
+    });
+
+  } catch (err) {
+    console.error("Arrived pickup error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update order status",
+    });
+  }
+}
+
+async function markOrderInTransit(req, res) {
+  try {
+    const { orderId } = req.params;
+    const riderId = req.rider?.id;
+
+    ////////////////////////////////////////////////////
+    // VALIDATION
+    ////////////////////////////////////////////////////
+
+    if (!riderId) {
+      return res.status(400).json({
+        success: false,
+        message: "riderId required",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // FETCH ORDER
+    ////////////////////////////////////////////////////
+
+    const order = await prisma.order.findUnique({
+      where: { orderId },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // VALID STATUS CHECK
+    ////////////////////////////////////////////////////
+
+    if (order.orderStatus !== "PICKED_UP") {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status: ${order.orderStatus}`,
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // VERIFY RIDER
+    ////////////////////////////////////////////////////
+
+    if (order.riderId !== riderId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not assigned to this order",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // UPDATE STATUS
+    ////////////////////////////////////////////////////
+
+    await prisma.order.update({
+      where: { orderId },
+      data: {
+        orderStatus: "IN_TRANSIT",
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Order is now in transit",
+      orderStatus: "IN_TRANSIT",
+    });
+
+  } catch (err) {
+    console.error("In transit error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update order status",
+    });
+  }
+}
+
+async function riderArrivedAtDrop(req, res) {
+  try {
+    const { orderId } = req.params;
+    const riderId = req.rider?.id;
+
+    ////////////////////////////////////////////////////
+    // VALIDATION
+    ////////////////////////////////////////////////////
+
+    if (!riderId) {
+      return res.status(400).json({
+        success: false,
+        message: "riderId required",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // FETCH ORDER
+    ////////////////////////////////////////////////////
+
+    const order = await prisma.order.findUnique({
+      where: { orderId },
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // VALID STATUS CHECK
+    ////////////////////////////////////////////////////
+
+    if (order.orderStatus !== "IN_TRANSIT") {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status: ${order.orderStatus}`,
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // VERIFY RIDER
+    ////////////////////////////////////////////////////
+
+    if (order.riderId !== riderId) {
+      return res.status(403).json({
+        success: false,
+        message: "Not assigned to this order",
+      });
+    }
+
+    ////////////////////////////////////////////////////
+    // UPDATE STATUS
+    ////////////////////////////////////////////////////
+
+    await prisma.order.update({
+      where: { orderId },
+      data: {
+        orderStatus: "RIDER_ARRIVED_AT_DROP",
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Rider arrived at drop location",
+      orderStatus: "RIDER_ARRIVED_AT_DROP",
+    });
+
+  } catch (err) {
+    console.error("Arrived drop error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update order status",
+    });
+  }
+}
+
 module.exports = {
   createOrder,
   confirmOrder,
@@ -2064,4 +2385,8 @@ module.exports = {
   getCancelledOrdersByRider,
   getSurgeStatus,
   OrderDetailsStored,
+  riderEnRouteToPickup,
+  riderArrivedAtPickup,
+  markOrderInTransit,
+  riderArrivedAtDrop
 };
